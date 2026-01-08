@@ -18,7 +18,7 @@ public class AuthController {
     private UserRepository userRepository;
 
     @Autowired
-    private PasswordEncoder passwordEncoder; // Injected BCrypt bean
+    private PasswordEncoder passwordEncoder; 
 
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody User user) {
@@ -27,7 +27,6 @@ public class AuthController {
                 .body(Map.of("message", "Email already registered."));
         }
         
-        // HASH the password before saving 
         user.setPassword(passwordEncoder.encode(user.getPassword()));
         
         userRepository.save(user);
@@ -43,7 +42,6 @@ public class AuthController {
 
         return userRepository.findByEmail(email)
             .map(user -> {
-                // Use passwordEncoder.matches to compare raw password with the hash
                 if (!passwordEncoder.matches(rawPassword, user.getPassword())) {
                     return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                         .body(Map.of("message", "Invalid access key."));

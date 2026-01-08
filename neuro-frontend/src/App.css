@@ -1,4 +1,3 @@
-/* Glassmorphism Card */
 .glass-card {
   background: rgba(30, 41, 59, 0.4);
   backdrop-filter: blur(12px);
@@ -8,7 +7,6 @@
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
 }
 
-/* Form Styling */
 .input-group {
   margin-bottom: 1.5rem;
 }
@@ -46,7 +44,6 @@
   transform: translateY(-2px);
 }
 
-/* Metric Tiles */
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -65,20 +62,17 @@
 .tile:hover {
   border-color: #3b82f6;
 }
-/* Fix for Dropdown visibility */
 .custom-select {
-  color: white; /* Text color for the collapsed select */
-  background-color: #1e293b; /* Dark background */
+  color: white; 
+  background-color: #1e293b; 
 }
 
-/* This ensures the text inside the dropdown list is visible */
 .custom-select option {
-  background-color: #0f172a; /* Dark background for the list */
-  color: white; /* White text for the list items */
+  background-color: #0f172a; 
+  color: white; 
   padding: 10px;
 }
 
-/* Ensure icons and inputs have proper alignment */
 .input-group {
   position: relative;
   display: flex;

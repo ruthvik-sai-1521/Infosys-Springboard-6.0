@@ -12,7 +12,7 @@ public class User {
     private Long id;
     
     private String username;
-    private String email; // Added this field
+    private String email;
     private String password;
     private String role; 
 }

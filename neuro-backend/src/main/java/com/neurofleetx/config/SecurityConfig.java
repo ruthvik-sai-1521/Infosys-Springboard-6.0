@@ -16,7 +16,7 @@ public class SecurityConfig {
 
     @Bean
     public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder(); // This handles hashing and salting
+        return new BCryptPasswordEncoder(); 
     }
 
     @Bean

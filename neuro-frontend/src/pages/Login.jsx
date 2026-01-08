@@ -65,7 +65,6 @@ export default function Login() {
         )}
 
         <form onSubmit={handleSubmit}>
-          {/* Restored Dropdown for both Login and Register */}
           <div className="input-group">
             <label className="input-label">Workspace Role</label>
             <select className="custom-select" value={form.role} onChange={(e) => setForm({...form, role: e.target.value})}>
@@ -81,7 +80,6 @@ export default function Login() {
               value={form.email} onChange={(e) => setForm({...form, email: e.target.value})} />
           </div>
 
-          {/* Username ONLY shown during Registration */}
           {!isLogin && (
             <div className="input-group">
               <input type="text" placeholder="Desired Username" className="custom-input" required 

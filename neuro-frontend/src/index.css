@@ -1,14 +1,12 @@
-/* Global Reset */
 body {
   margin: 0;
   padding: 0;
-  background-color: #020617; /* Deep Navy Background */
+  background-color: #020617; 
   color: #f8fafc;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   overflow-x: hidden;
 }
 
-/* Background Glow Effect */
 .bg-glow {
   position: fixed;
   top: 50%;
