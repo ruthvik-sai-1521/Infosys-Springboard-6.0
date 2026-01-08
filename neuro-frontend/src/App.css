@@ -1,0 +1,107 @@
+/* Glassmorphism Card */
+.glass-card {
+  background: rgba(30, 41, 59, 0.4);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 2rem;
+  padding: 40px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+/* Form Styling */
+.input-group {
+  margin-bottom: 1.5rem;
+}
+
+.custom-input, .custom-select {
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: white;
+  box-sizing: border-box;
+  outline: none;
+  transition: border 0.3s;
+}
+
+.custom-input:focus, .custom-select:focus {
+  border-color: #3b82f6;
+}
+
+.btn-primary {
+  width: 100%;
+  padding: 14px;
+  background-color: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: transform 0.2s, background 0.3s;
+}
+
+.btn-primary:hover {
+  background-color: #3b82f6;
+  transform: translateY(-2px);
+}
+
+/* Metric Tiles */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 24px;
+  margin-top: 40px;
+}
+
+.tile {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 24px;
+  border-radius: 20px;
+  transition: border 0.3s;
+}
+
+.tile:hover {
+  border-color: #3b82f6;
+}
+/* Fix for Dropdown visibility */
+.custom-select {
+  color: white; /* Text color for the collapsed select */
+  background-color: #1e293b; /* Dark background */
+}
+
+/* This ensures the text inside the dropdown list is visible */
+.custom-select option {
+  background-color: #0f172a; /* Dark background for the list */
+  color: white; /* White text for the list items */
+  padding: 10px;
+}
+
+/* Ensure icons and inputs have proper alignment */
+.input-group {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.error-box {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid #ef4444;
+  color: #f87171;
+  padding: 12px;
+  border-radius: 12px;
+  marginBottom: 20px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.input-label {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: bold;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
