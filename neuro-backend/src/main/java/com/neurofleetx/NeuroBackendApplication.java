@@ -10,4 +10,9 @@ public class NeuroBackendApplication {
 		SpringApplication.run(NeuroBackendApplication.class, args);
 	}
 
+	@org.springframework.context.annotation.Bean
+	public org.springframework.web.client.RestTemplate restTemplate() {
+		return new org.springframework.web.client.RestTemplate();
+	}
+
 }
