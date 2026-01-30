@@ -35,7 +35,7 @@ const DriverTripsPage = () => {
 
     // ... (Existing State: tripForm, etc.)
     const [tripForm, setTripForm] = useState({
-        source: '', destination: '', date: '', time: '', availableSeats: 3, fare: 0, vehicleId: ''
+        source: '', destination: '', date: '', time: '', availableSeats: 3, fare: 0, vehicleId: '', estimatedDuration: ''
     });
 
     const driverId = user?.id || 1;
@@ -135,6 +135,10 @@ const DriverTripsPage = () => {
     const handlePostTrip = async (e) => {
         e.preventDefault();
         try {
+            // Get the selected vehicle to retrieve its seat count
+            const selectedVehicle = vehicles.find(v => String(v.id) === String(tripForm.vehicleId));
+            const availableSeats = selectedVehicle?.seatCount || 3; // Default to 3 if not found
+            
             const tripPayload = {
                 driverId: user?.id || 1, // Ensure driverId is valid
                 vehicleId: tripForm.vehicleId,
@@ -142,10 +146,11 @@ const DriverTripsPage = () => {
                 destination: tripForm.destination,
                 tripDate: `${tripForm.date}T${tripForm.time}:00`,
                 fare: parseFloat(tripForm.fare),
-                availableSeats: 4, // Default, logic should come from vehicle capacity
+                availableSeats: availableSeats, // Use vehicle's actual seat count
                 pickupPoints: tripForm.pickupPoints,
                 dropPoints: tripForm.dropPoints,
-                totalKm: tripForm.totalKm
+                totalKm: tripForm.totalKm,
+                estimatedDuration: tripForm.estimatedDuration ? parseInt(tripForm.estimatedDuration) : null
             };
             await axios.post(`/api/trips/create`, tripPayload);
             alert("Trip Posted Successfully!");
@@ -170,13 +175,18 @@ const DriverTripsPage = () => {
                 const duration = route.duration || "0s";
                 const km = (distanceMeters / 1000).toFixed(1);
                 
-                alert(`AI Suggested Route:\nDistance: ${km} km\nDuration: ${duration}`);
+                // Parse duration from seconds to minutes
+                const durationInSeconds = parseInt(duration.replace('s', ''));
+                const durationInMinutes = Math.ceil(durationInSeconds / 60);
+                
+                alert(`AI Suggested Route:\nDistance: ${km} km\nDuration: ${durationInMinutes} minutes`);
                 
                 // Auto-fill form
                 setTripForm(prev => ({
                     ...prev,
                     totalKm: km,
-                    estimatedReachingTime: duration.replace("s", " seconds") // Simple format, ideally parse Duration
+                    estimatedReachingTime: `${durationInMinutes} minutes`,
+                    estimatedDuration: durationInMinutes
                 }));
             }
         } catch (err) {
@@ -327,9 +337,22 @@ const DriverTripsPage = () => {
                                         {new Date(trip.tripDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                                     </div>
                                     <div className="flex items-center gap-3">
-                                        <span className={`w-2 h-2 rounded-full ${trip.status === 'IN_PROGRESS' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-500'}`}></span>
+                                        <span className={`w-2 h-2 rounded-full ${trip.status === 'IN_PROGRESS' ? 'bg-emerald-500 animate-pulse' : trip.status === 'AUTO_COMPLETED' ? 'bg-amber-500' : 'bg-slate-500'}`}></span>
                                         <span className="uppercase text-[10px] font-bold tracking-widest">{trip.status}</span>
+                                        {trip.status === 'AUTO_COMPLETED' && <span className="text-[10px] text-amber-400">(Auto-ended)</span>}
                                     </div>
+                                    {trip.actualStartTime && (
+                                        <div className="flex items-center gap-3 text-xs text-blue-400">
+                                            <Clock className="w-3 h-3" />
+                                            Started: {new Date(trip.actualStartTime).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'})}
+                                        </div>
+                                    )}
+                                    {trip.actualEndTime && (
+                                        <div className="flex items-center gap-3 text-xs text-emerald-400">
+                                            <Clock className="w-3 h-3" />
+                                            Ended: {new Date(trip.actualEndTime).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'})}
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="mt-6 pt-4 border-t border-slate-800 flex justify-between items-center relative z-10 gap-2">
@@ -563,6 +586,15 @@ const DriverTripsPage = () => {
                                             value={tripForm.totalKm || ''}
                                             onChange={e => setTripForm({...tripForm, totalKm: parseFloat(e.target.value)})} />
                                     </div>
+                                </div>
+
+                                {/* Row 4: Estimated Duration */}
+                                <div>
+                                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Estimated Duration (minutes)</label>
+                                    <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:border-blue-500 outline-none text-white" placeholder="e.g. 120 for 2 hours"
+                                        value={tripForm.estimatedDuration || ''}
+                                        onChange={e => setTripForm({...tripForm, estimatedDuration: e.target.value})} />
+                                    <p className="text-xs text-slate-500 mt-1">Optional: Auto-filled by AI route or enter manually</p>
                                 </div>
 
                                 <div className="pt-2">

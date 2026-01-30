@@ -46,4 +46,14 @@ public class User {
 
     @Column(name = "branch")
     private String branch;
+
+    // Driver Statistics
+    @Column(name = "total_earnings")
+    private Double totalEarnings = 0.0;
+
+    @Column(name = "pending_earnings")
+    private Double pendingEarnings = 0.0;
+
+    @Column(name = "completed_trips_count")
+    private Integer completedTripsCount = 0;
 }

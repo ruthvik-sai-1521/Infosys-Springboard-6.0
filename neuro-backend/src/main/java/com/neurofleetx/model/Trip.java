@@ -35,8 +35,21 @@ public class Trip {
     @Column(name = "total_km")
     private Double totalKm;
 
-    // SCHEDULED, COMPLETED, CANCELLED
+    // SCHEDULED, IN_PROGRESS, COMPLETED, AUTO_COMPLETED, CANCELLED
     private String status;
+
+    // Trip execution tracking
+    @Column(name = "actual_start_time")
+    private LocalDateTime actualStartTime;
+
+    @Column(name = "actual_end_time")
+    private LocalDateTime actualEndTime;
+
+    @Column(name = "estimated_duration")
+    private Integer estimatedDuration; // in minutes
+
+    @Column(name = "auto_end_time")
+    private LocalDateTime autoEndTime; // calculated: tripDate + estimatedDuration
 
     @ManyToOne
     @JoinColumn(name = "driver_id")

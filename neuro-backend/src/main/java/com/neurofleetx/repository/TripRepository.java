@@ -16,4 +16,7 @@ public interface TripRepository extends JpaRepository<Trip, Long> {
             String source, String destination, LocalDateTime tripDate, String status);
 
     List<Trip> findByStatus(String status);
+
+    // Find trips that need to be auto-ended
+    List<Trip> findByStatusAndAutoEndTimeBefore(String status, LocalDateTime autoEndTime);
 }

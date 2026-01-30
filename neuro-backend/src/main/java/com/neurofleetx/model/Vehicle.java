@@ -33,7 +33,7 @@ public class Vehicle {
 
     private String status = "PENDING_ADMIN_APPROVAL";
 
-    private String type; // EV, SEDAN, SUV
+    private String type; // EV, SEDAN, SUV, HATCHBACK
 
     @Column(name = "seat_count")
     private Integer seatCount;
@@ -59,4 +59,29 @@ public class Vehicle {
     @ManyToOne
     @JoinColumn(name = "driver_id")
     private User driver;
+
+    /**
+     * Automatically set seat count based on vehicle type before persisting
+     */
+    @PrePersist
+    @PreUpdate
+    public void setSeatCountFromType() {
+        if (this.type != null) {
+            String vehicleType = this.type.toUpperCase();
+            switch (vehicleType) {
+                case "SUV":
+                    this.seatCount = 5;
+                    break;
+                case "SEDAN":
+                case "HATCHBACK":
+                case "EV":
+                    this.seatCount = 3;
+                    break;
+                default:
+                    // Default to 3 seats for unknown types
+                    this.seatCount = 3;
+                    break;
+            }
+        }
+    }
 }

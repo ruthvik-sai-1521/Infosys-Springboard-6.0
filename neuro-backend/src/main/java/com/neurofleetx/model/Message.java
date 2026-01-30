@@ -23,5 +23,19 @@ public class Message {
     @Column(columnDefinition = "TEXT")
     private String content;
 
+    @Column(name = "sent_at")
     private LocalDateTime sentAt;
+
+    @Column(name = "is_read")
+    private Boolean isRead = false;
+
+    @PrePersist
+    protected void onCreate() {
+        if (sentAt == null) {
+            sentAt = LocalDateTime.now();
+        }
+        if (isRead == null) {
+            isRead = false;
+        }
+    }
 }

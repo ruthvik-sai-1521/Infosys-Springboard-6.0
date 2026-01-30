@@ -38,6 +38,19 @@ const ManagerDashboard = () => {
     const [selectedContactUser, setSelectedContactUser] = useState(null);
     const [messageText, setMessageText] = useState("");
 
+    // Vehicle Detail Modal
+    const [vehicleModalOpen, setVehicleModalOpen] = useState(false);
+    const [selectedVehicle, setSelectedVehicle] = useState(null);
+    const [messages, setMessages] = useState([]);
+
+    // Admin Requests
+    const [adminRequests, setAdminRequests] = useState([]);
+    const [newRequest, setNewRequest] = useState({
+        type: 'INQUIRY',
+        subject: '',
+        message: ''
+    });
+
     const fetchData = useCallback(async () => {
         const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
         try {
@@ -56,6 +69,13 @@ const ManagerDashboard = () => {
             if (authUser?.username) {
                 const profile = uRes.data.find(u => u.username === authUser.username);
                 setManagerProfile(profile || { username: authUser.username, empId: 'MGR-001', branch: 'Main Branch' });
+                
+                // Fetch admin requests
+                if (profile?.id) {
+                    axios.get(`/api/admin-requests/my-requests/${profile.id}`, config)
+                        .then(res => setAdminRequests(res.data))
+                        .catch(e => console.error("Error fetching requests:", e));
+                }
             }
         } catch(e) { console.error("Error fetching data:", e); }
     }, [authUser]);
@@ -105,87 +125,144 @@ const ManagerDashboard = () => {
 
     // --- SUB-SECTIONS ---
 
-    const renderOverview = () => (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-fade-in">
-             <div className="lg:col-span-2 glass-panel p-6 rounded-xl bg-slate-900 border border-slate-800">
-                <h2 className="text-xl font-bold mb-6 text-white flex items-center gap-2">
-                    <LayoutDashboard className="w-5 h-5 text-blue-400" /> Live Trip Monitoring
-                </h2>
-                <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
-                    {trips.length === 0 ? <p className="text-slate-500">No active trips.</p> : (
-                        trips.map(t => (
-                            <div key={t.id} className="p-5 bg-slate-800/50 rounded-xl border border-slate-700 hover:border-blue-500/30 transition-colors">
-                                <div className="flex justify-between items-start mb-4">
-                                    <div>
-                                        <h4 className="font-bold text-white text-lg flex items-center gap-2">
-                                            {t.source} <span className="text-slate-500">➔</span> {t.destination}
-                                        </h4>
-                                        <p className="text-xs text-blue-400 font-mono mt-1">ID: #{t.id} • {new Date(t.tripDate).toLocaleString()}</p>
-                                    </div>
-                                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${t.status === 'SCHEDULED' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
-                                        {t.status}
-                                    </span>
-                                </div>
-                                
-                                {/* Detailed Trip Info Grid */}
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs mb-4">
-                                    <div className="bg-slate-900 p-2 rounded border border-slate-800">
-                                        <p className="text-slate-500 uppercase font-bold text-[10px]">Driver</p>
-                                        <p className="text-white font-bold truncate">{t.driver?.username}</p>
-                                    </div>
-                                    <div className="bg-slate-900 p-2 rounded border border-slate-800">
-                                        <p className="text-slate-500 uppercase font-bold text-[10px]">Vehicle</p>
-                                        <p className="text-white font-bold truncate">{t.vehicle?.vehicleNumber}</p>
-                                        <p className="text-slate-400 text-[10px]">{t.vehicle?.model}</p>
-                                    </div>
-                                    <div className="bg-slate-900 p-2 rounded border border-slate-800">
-                                        <p className="text-slate-500 uppercase font-bold text-[10px]">Bookings</p>
-                                        <p className="text-white font-bold">{t.availableSeats} Open</p>
-                                    </div>
-                                    <div className="bg-slate-900 p-2 rounded border border-slate-800">
-                                        <p className="text-slate-500 uppercase font-bold text-[10px]">Est. Time</p>
-                                        <p className="text-white font-bold">{t.estimatedReachingTime || 'N/A'}</p>
-                                    </div>
-                                </div>
-                            </div>
-                        ))
-                    )}
+    const renderOverview = () => {
+        // Helper function to format duration
+        const formatDuration = (minutes) => {
+            if (!minutes) return 'N/A';
+            const hours = Math.floor(minutes / 60);
+            const mins = minutes % 60;
+            if (hours > 0) return `${hours}h ${mins}m`;
+            return `${mins}m`;
+        };
+
+        // Sort trips by date (newest first)
+        const sortedTrips = [...trips].sort((a, b) => 
+            new Date(b.tripDate) - new Date(a.tripDate)
+        );
+
+        // Filter into active and past trips
+        const activeTrips = sortedTrips.filter(t => 
+            ['SCHEDULED', 'IN_PROGRESS'].includes(t.status)
+        );
+        const pastTrips = sortedTrips.filter(t => 
+            ['COMPLETED', 'AUTO_COMPLETED', 'CANCELLED'].includes(t.status)
+        );
+
+        // Status badge color mapping
+        const getStatusColor = (status) => {
+            switch(status) {
+                case 'SCHEDULED': return 'bg-emerald-500/20 text-emerald-400';
+                case 'IN_PROGRESS': return 'bg-blue-500/20 text-blue-400';
+                case 'COMPLETED': return 'bg-purple-500/20 text-purple-400';
+                case 'AUTO_COMPLETED': return 'bg-cyan-500/20 text-cyan-400';
+                case 'CANCELLED': return 'bg-red-500/20 text-red-400';
+                default: return 'bg-slate-700 text-slate-400';
+            }
+        };
+
+        const TripCard = ({ trip, isPast = false }) => (
+            <div className={`p-5 bg-slate-800/50 rounded-xl border transition-colors ${isPast ? 'border-slate-700/50 hover:border-purple-500/30' : 'border-slate-700 hover:border-blue-500/30'}`}>
+                <div className="flex justify-between items-start mb-4">
+                    <div>
+                        <h4 className="font-bold text-white text-lg flex items-center gap-2">
+                            {trip.source} <span className="text-slate-500">➔</span> {trip.destination}
+                        </h4>
+                        <p className="text-xs text-blue-400 font-mono mt-1">ID: #{trip.id} • {new Date(trip.tripDate).toLocaleString()}</p>
+                    </div>
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${getStatusColor(trip.status)}`}>
+                        {trip.status}
+                    </span>
                 </div>
-             </div>
+                
+                {/* Detailed Trip Info Grid */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                    <div className="bg-slate-900 p-2 rounded border border-slate-800">
+                        <p className="text-slate-500 uppercase font-bold text-[10px]">Driver</p>
+                        <p className="text-white font-bold truncate">{trip.driver?.username || 'N/A'}</p>
+                    </div>
+                    <div className="bg-slate-900 p-2 rounded border border-slate-800">
+                        <p className="text-slate-500 uppercase font-bold text-[10px]">Vehicle</p>
+                        <p className="text-white font-bold truncate">{trip.vehicle?.vehicleNumber || 'N/A'}</p>
+                        <p className="text-slate-400 text-[10px]">{trip.vehicle?.type}</p>
+                    </div>
+                    <div className="bg-slate-900 p-2 rounded border border-slate-800">
+                        <p className="text-slate-500 uppercase font-bold text-[10px]">Available Seats</p>
+                        <p className="text-white font-bold">{trip.availableSeats} Open</p>
+                    </div>
+                    <div className="bg-slate-900 p-2 rounded border border-slate-800">
+                        <p className="text-slate-500 uppercase font-bold text-[10px]">Est. Duration</p>
+                        <p className="text-white font-bold">{formatDuration(trip.estimatedDuration)}</p>
+                    </div>
+                </div>
+            </div>
+        );
 
-             <div className="glass-panel p-6 rounded-xl bg-slate-900 border border-slate-800 h-fit">
-                 {/* Manager Profile Card */}
-                 <div className="mb-8 text-center bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl border border-slate-700 shadow-xl">
-                     <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-emerald-500/30">
-                        <UserCircle className="w-10 h-10 text-emerald-400" />
-                     </div>
-                     <h3 className="text-lg font-bold text-white">{managerProfile?.username || "Manager"}</h3>
-                     <p className="text-slate-400 text-sm mb-4">Fleet Manager</p>
-                     
-                     <div className="grid grid-cols-2 gap-2 text-left text-xs bg-slate-950/50 p-3 rounded-lg">
-                         <div>
-                             <p className="text-slate-500 block mb-1">Emp ID</p>
-                             <p className="text-white font-bold flex items-center gap-1"><Briefcase className="w-3 h-3"/> {managerProfile?.empId || "N/A"}</p>
+        return (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-fade-in">
+                 <div className="lg:col-span-2 space-y-6">
+                    {/* Recent Trips Section */}
+                    <div className="glass-panel p-6 rounded-xl bg-slate-900 border border-slate-800">
+                        <h2 className="text-xl font-bold mb-6 text-white flex items-center gap-2">
+                            <LayoutDashboard className="w-5 h-5 text-blue-400" /> Recent Trips
+                        </h2>
+                        <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+                            {activeTrips.length === 0 ? (
+                                <p className="text-slate-500">No recent trips.</p>
+                            ) : (
+                                activeTrips.slice(0, 10).map(t => <TripCard key={t.id} trip={t} />)
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Past Trips Section */}
+                    <div className="glass-panel p-6 rounded-xl bg-slate-900 border border-slate-800">
+                        <h2 className="text-xl font-bold mb-6 text-white flex items-center gap-2">
+                            <LayoutDashboard className="w-5 h-5 text-purple-400" /> Past Trips
+                        </h2>
+                        <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+                            {pastTrips.length === 0 ? (
+                                <p className="text-slate-500">No completed trips.</p>
+                            ) : (
+                                pastTrips.slice(0, 10).map(t => <TripCard key={t.id} trip={t} isPast={true} />)
+                            )}
+                        </div>
+                    </div>
+                 </div>
+
+                 <div className="glass-panel p-6 rounded-xl bg-slate-900 border border-slate-800 h-fit">
+                     {/* Manager Profile Card */}
+                     <div className="mb-8 text-center bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl border border-slate-700 shadow-xl">
+                         <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-emerald-500/30">
+                            <UserCircle className="w-10 h-10 text-emerald-400" />
                          </div>
-                         <div>
-                             <p className="text-slate-500 block mb-1">Branch</p>
-                             <p className="text-white font-bold flex items-center gap-1"><Building className="w-3 h-3"/> {managerProfile?.branch || "N/A"}</p>
+                         <h3 className="text-lg font-bold text-white">{managerProfile?.username || "Manager"}</h3>
+                         <p className="text-slate-400 text-sm mb-4">Fleet Manager</p>
+                         
+                         <div className="grid grid-cols-2 gap-2 text-left text-xs bg-slate-950/50 p-3 rounded-lg">
+                             <div>
+                                 <p className="text-slate-500 block mb-1">Emp ID</p>
+                                 <p className="text-white font-bold flex items-center gap-1"><Briefcase className="w-3 h-3"/> {managerProfile?.empId || "N/A"}</p>
+                             </div>
+                             <div>
+                                 <p className="text-slate-500 block mb-1">Branch</p>
+                                 <p className="text-white font-bold flex items-center gap-1"><Building className="w-3 h-3"/> {managerProfile?.branch || "N/A"}</p>
+                             </div>
+                         </div>
+                     </div>
+
+                     <h3 className="text-lg font-bold mb-4 text-white flex items-center gap-2">
+                         <AlertTriangle className="w-5 h-5 text-red-500" /> Critical Alerts
+                     </h3>
+                     <div className="space-y-3">
+                         <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+                             <p className="text-sm font-bold text-red-400">Maintenance Due</p>
+                             <p className="text-xs text-slate-400 mt-1">Vehicle KA-01-AB-1234 requires service.</p>
                          </div>
                      </div>
                  </div>
-
-                 <h3 className="text-lg font-bold mb-4 text-white flex items-center gap-2">
-                     <AlertTriangle className="w-5 h-5 text-red-500" /> Critical Alerts
-                 </h3>
-                 <div className="space-y-3">
-                     <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
-                         <p className="text-sm font-bold text-red-400">Maintenance Due</p>
-                         <p className="text-xs text-slate-400 mt-1">Vehicle KA-01-AB-1234 requires service.</p>
-                     </div>
-                 </div>
-             </div>
-        </div>
-    );
+            </div>
+        );
+    };
 
     const renderMap = () => (
         <div className="animate-fade-in h-[80vh] flex flex-col gap-4">
@@ -267,7 +344,38 @@ const ManagerDashboard = () => {
         </div>
     );
 
-    const renderFleet = () => (
+    // Handle vehicle click to open detail modal
+    const handleVehicleClick = async (vehicle) => {
+        setSelectedVehicle(vehicle);
+        setVehicleModalOpen(true);
+        
+        // Fetch messages for this driver if exists
+        if (vehicle.driverId) {
+            try {
+                const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
+                const messagesRes = await axios.get(`/api/messages/conversation/${managerProfile?.id}/${vehicle.driverId}`, config);
+                setMessages(messagesRes.data || []);
+            } catch(e) {
+                console.error("Error fetching messages:", e);
+                setMessages([]);
+            }
+        }
+    };
+
+    // Handle Live button click
+    const handleLiveClick = (vehicle) => {
+        if (vehicle.currentLocation) {
+            const [lat, lng] = vehicle.currentLocation.split(',').map(Number);
+            if (!isNaN(lat) && !isNaN(lng)) {
+                setMapCenter({ lat, lng });
+                setSelectedMapVehicle(vehicle);
+                setActiveSection('map');
+            }
+        }
+    };
+
+    const renderFleet = () => {
+        return (
         <div className="animate-fade-in">
              <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold text-white">Full Verified Fleet</h2>
@@ -292,7 +400,7 @@ const ManagerDashboard = () => {
                         v.vehicleNumber?.toLowerCase().includes(vehicleSearch.toLowerCase())
                     )
                     .map(v => (
-                    <div key={v.id} className="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-emerald-500/50 transition-colors group">
+                    <div key={v.id} className="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-emerald-500/50 transition-colors group cursor-pointer" onClick={() => handleVehicleClick(v)}>
                         <div className="flex justify-between items-start mb-4">
                             <div className="bg-slate-800 p-3 rounded-lg"><Car className="w-6 h-6 text-emerald-400" /></div>
                             <span className={`text-xs font-bold px-2 py-1 rounded ${v.status === 'AVAILABLE' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>{v.status}</span>
@@ -310,18 +418,24 @@ const ManagerDashboard = () => {
                         </div>
                         
                         {/* Only Real Data - No Dummy Locations */}
-                        <div className="mt-4 pt-3 border-t border-slate-800 flex justify-between items-center text-xs text-slate-500">
-                             <span className="flex items-center gap-1"><Users className="w-3 h-3"/> {v.seatCount || 4} Seats</span>
-                             {v.currentLocation ? (
-                                 <span className="flex items-center gap-1 text-emerald-400"><MapPin className="w-3 h-3" /> Live</span>
-                             ) : <span>No loc data</span>}
-                        </div>
+                    <div className="mt-4 pt-3 border-t border-slate-800 flex justify-between items-center text-xs">
+                         <span className="flex items-center gap-1 text-slate-500"><Users className="w-3 h-3"/> {v.seatCount || 4} Seats</span>
+                         {v.currentLocation ? (
+                             <button 
+                                 onClick={(e) => { e.stopPropagation(); handleLiveClick(v); }} 
+                                 className="flex items-center gap-1 text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded hover:bg-emerald-500/20 transition-colors"
+                             >
+                                 <MapPin className="w-3 h-3" /> View on Map
+                             </button>
+                         ) : <span className="text-slate-500">No location</span>}
+                    </div>
                     </div>
                 ))}
                 {vehicles.length === 0 && <p className="text-slate-500 col-span-full">No verified vehicles found.</p>}
-             </div>
-        </div>
-    );
+         </div>
+    </div>
+        );
+    };
 
     const renderUsers = () => (
          <div className="animate-fade-in">
@@ -418,6 +532,152 @@ const ManagerDashboard = () => {
         </div>
     );
 
+    const renderAdminRequests = () => {
+        const handleSubmitRequest = async () => {
+            if (!newRequest.subject || !newRequest.message) {
+                alert("Please fill in all fields");
+                return;
+            }
+
+            try {
+                const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
+                await axios.post('/api/admin-requests/create', {
+                    senderId: managerProfile?.id,
+                    type: newRequest.type,
+                    subject: newRequest.subject,
+                    message: newRequest.message
+                }, config);
+
+                alert("Request sent successfully!");
+                setNewRequest({ type: 'INQUIRY', subject: '', message: '' });
+                fetchData(); // Refresh requests
+            } catch(e) {
+                alert("Failed to send request");
+                console.error(e);
+            }
+        };
+
+        const getStatusColor = (status) => {
+            switch(status) {
+                case 'PENDING': return 'bg-amber-500/20 text-amber-400';
+                case 'READ': return 'bg-blue-500/20 text-blue-400';
+                case 'RESPONDED': return 'bg-emerald-500/20 text-emerald-400';
+                default: return 'bg-slate-700 text-slate-400';
+            }
+        };
+
+        const getTypeLabel = (type) => {
+            switch(type) {
+                case 'INQUIRY': return 'General Inquiry';
+                case 'VEHICLE_REQUEST': return 'Vehicle Approval';
+                case 'DRIVER_ISSUE': return 'Driver Issue';
+                case 'FEEDBACK': return 'System Feedback';
+                default: return type;
+            }
+        };
+
+        return (
+            <div className="animate-fade-in space-y-6">
+                {/* Send Request Form */}
+                <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+                    <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
+                        <MessageSquare className="w-6 h-6 text-blue-400" /> Send Request to Admin
+                    </h2>
+                    
+                    <div className="space-y-4">
+                        {/* Request Type */}
+                        <div>
+                            <label className="text-sm font-bold text-slate-400 block mb-2">Request Type</label>
+                            <select 
+                                value={newRequest.type}
+                                onChange={e => setNewRequest({...newRequest, type: e.target.value})}
+                                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-blue-500 outline-none"
+                            >
+                                <option value="INQUIRY">General Inquiry</option>
+                                <option value="VEHICLE_REQUEST">Vehicle Approval Request</option>
+                                <option value="DRIVER_ISSUE">Driver Issue Report</option>
+                                <option value="FEEDBACK">System Feedback</option>
+                            </select>
+                        </div>
+
+                        {/* Subject */}
+                        <div>
+                            <label className="text-sm font-bold text-slate-400 block mb-2">Subject</label>
+                            <input 
+                                type="text"
+                                value={newRequest.subject}
+                                onChange={e => setNewRequest({...newRequest, subject: e.target.value})}
+                                placeholder="Brief subject line..."
+                                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-blue-500 outline-none"
+                            />
+                        </div>
+
+                        {/* Message */}
+                        <div>
+                            <label className="text-sm font-bold text-slate-400 block mb-2">Message</label>
+                            <textarea 
+                                value={newRequest.message}
+                                onChange={e => setNewRequest({...newRequest, message: e.target.value})}
+                                placeholder="Describe your request in detail..."
+                                rows="5"
+                                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-blue-500 outline-none resize-none"
+                            />
+                        </div>
+
+                        <button 
+                            onClick={handleSubmitRequest}
+                            className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-blue-900/40 transition-colors"
+                        >
+                            Send Request
+                        </button>
+                    </div>
+                </div>
+
+                {/* Requests List */}
+                <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+                    <h2 className="text-2xl font-bold text-white mb-6">My Requests</h2>
+                    
+                    <div className="space-y-4">
+                        {adminRequests.length === 0 ? (
+                            <p className="text-slate-500 text-center py-8">No requests sent yet</p>
+                        ) : (
+                            adminRequests.map(request => (
+                                <div key={request.id} className="bg-slate-800/50 p-5 rounded-xl border border-slate-700">
+                                    <div className="flex justify-between items-start mb-3">
+                                        <div>
+                                            <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-1 rounded font-bold">
+                                                {getTypeLabel(request.type)}
+                                            </span>
+                                            <h3 className="text-lg font-bold text-white mt-2">{request.subject}</h3>
+                                            <p className="text-slate-400 text-sm mt-1">{request.message}</p>
+                                        </div>
+                                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${getStatusColor(request.status)}`}>
+                                            {request.status}
+                                        </span>
+                                    </div>
+
+                                    {request.response && (
+                                        <div className="mt-4 pt-4 border-t border-slate-700">
+                                            <p className="text-xs text-emerald-400 font-bold mb-2">Admin Response:</p>
+                                            <p className="text-white text-sm bg-slate-900 p-3 rounded-lg">{request.response}</p>
+                                            <p className="text-xs text-slate-500 mt-2">
+                                                Responded: {new Date(request.respondedAt).toLocaleString()}
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    <p className="text-xs text-slate-500 mt-3">
+                                        Sent: {new Date(request.createdAt).toLocaleString()}
+                                    </p>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div className="min-h-screen bg-slate-950 text-white flex font-sans">
              {/* SIDEBAR */}
@@ -431,6 +691,7 @@ const ManagerDashboard = () => {
                      <SidebarItem icon={<Car />} label="Fleet" active={activeSection === 'fleet'} onClick={() => setActiveSection('fleet')} />
                      <SidebarItem icon={<Users />} label="Directory" active={activeSection === 'users'} onClick={() => setActiveSection('users')} />
                      <SidebarItem icon={<MessageSquare />} label="Feedbacks" active={activeSection === 'feedback'} onClick={() => setActiveSection('feedback')} />
+                     <SidebarItem icon={<Mail />} label="Admin Requests" active={activeSection === 'requests'} onClick={() => setActiveSection('requests')} />
                  </nav>
                  <div className="p-4 border-t border-slate-800">
                      <div className="flex items-center gap-3 mb-4 px-2">
@@ -453,6 +714,7 @@ const ManagerDashboard = () => {
                     {activeSection === 'fleet' && renderFleet()}
                     {activeSection === 'users' && renderUsers()}
                     {activeSection === 'feedback' && renderFeedback()}
+                    {activeSection === 'requests' && renderAdminRequests()}
                 </div>
              </div>
 
@@ -480,8 +742,164 @@ const ManagerDashboard = () => {
                         />
                         <button onClick={handleSendMessage} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-blue-900/40">Send Message</button>
                     </div>
-                </div>
+                 </div>
              )}
+
+             {/* VEHICLE DETAIL MODAL */}
+             {vehicleModalOpen && selectedVehicle && (() => {
+                 const driver = users.find(u => u.id === selectedVehicle.driverId);
+                 const driverTrips = trips.filter(t => t.driver?.id === selectedVehicle.driverId);
+                 const driverFeedbacks = reviews.filter(r => r.driver?.id === selectedVehicle.driverId);
+                 
+                 return (
+                     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in overflow-y-auto">
+                         <div className="bg-slate-900 w-full max-w-4xl rounded-2xl border border-slate-700 shadow-2xl relative my-8">
+                             {/* Header */}
+                             <div className="bg-gradient-to-r from-slate-800 to-slate-900 p-6 rounded-t-2xl border-b border-slate-700">
+                                 <button onClick={() => setVehicleModalOpen(false)} className="absolute top-4 right-4 text-slate-500 hover:text-white text-2xl">✕</button>
+                                 <div className="flex items-center gap-4">
+                                     <div className="w-16 h-16 bg-emerald-500/20 rounded-xl flex items-center justify-center border border-emerald-500/30">
+                                         <Car className="w-8 h-8 text-emerald-400" />
+                                     </div>
+                                     <div>
+                                         <h2 className="text-2xl font-bold text-white">{selectedVehicle.vehicleNumber}</h2>
+                                         <p className="text-slate-400">{selectedVehicle.type} • {selectedVehicle.model}</p>
+                                     </div>
+                                     <span className={`ml-auto px-3 py-1 rounded-full text-xs font-bold ${selectedVehicle.status === 'AVAILABLE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
+                                         {selectedVehicle.status}
+                                     </span>
+                                 </div>
+                             </div>
+
+                             {/* Content */}
+                             <div className="p-6 max-h-[70vh] overflow-y-auto">
+                                 {/* Vehicle Info Grid */}
+                                 <div className="grid grid-cols-3 gap-4 mb-6">
+                                     <div className="bg-slate-800/50 p-4 rounded-xl">
+                                         <p className="text-slate-500 text-xs uppercase mb-1">Seat Capacity</p>
+                                         <p className="text-white font-bold text-lg">{selectedVehicle.seatCount || 4}</p>
+                                     </div>
+                                     <div className="bg-slate-800/50 p-4 rounded-xl">
+                                         <p className="text-slate-500 text-xs uppercase mb-1">Kilometers</p>
+                                         <p className="text-white font-bold text-lg">{selectedVehicle.kilometersDriven || 0} km</p>
+                                     </div>
+                                     <div className="bg-slate-800/50 p-4 rounded-xl">
+                                         <p className="text-slate-500 text-xs uppercase mb-1">Location</p>
+                                         <p className="text-white font-bold text-sm truncate">{selectedVehicle.currentLocation || 'N/A'}</p>
+                                     </div>
+                                 </div>
+
+                                 {driver ? (
+                                     <>
+                                         {/* Driver Details */}
+                                         <div className="bg-gradient-to-br from-blue-900/20 to-purple-900/20 p-6 rounded-xl border border-blue-800/30 mb-6">
+                                             <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                                                 <UserCircle className="w-5 h-5 text-blue-400" /> Assigned Driver
+                                             </h3>
+                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                 <div>
+                                                     <p className="text-slate-500 text-xs uppercase mb-1">Name</p>
+                                                     <p className="text-white font-bold">{driver.username}</p>
+                                                 </div>
+                                                 <div>
+                                                     <p className="text-slate-500 text-xs uppercase mb-1">Email</p>
+                                                     <p className="text-white font-bold text-sm truncate">{driver.email}</p>
+                                                 </div>
+                                                 <div>
+                                                     <p className="text-slate-500 text-xs uppercase mb-1">Total Earnings</p>
+                                                     <p className="text-emerald-400 font-bold text-lg">₹{driver.totalEarnings?.toLocaleString() || 0}</p>
+                                                 </div>
+                                                 <div>
+                                                     <p className="text-slate-500 text-xs uppercase mb-1">Trips Completed</p>
+                                                     <p className="text-white font-bold text-lg">{driver.completedTripsCount || 0}</p>
+                                                 </div>
+                                             </div>
+                                         </div>
+
+                                         {/* Tabs for Trips, Feedbacks, Messages */}
+                                         <div className="space-y-4">
+                                             {/* Trips */}
+                                             <div className="bg-slate-800/50 p-4 rounded-xl">
+                                                 <h4 className="font-bold text-white mb-3 flex items-center gap-2">
+                                                     <Car className="w-4 h-4 text-purple-400" /> Recent Trips ({driverTrips.length})
+                                                 </h4>
+                                                 <div className="space-y-2 max-h-48 overflow-y-auto">
+                                                     {driverTrips.length > 0 ? (
+                                                         driverTrips.slice(0, 5).map(trip => (
+                                                             <div key={trip.id} className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                                                                 <div className="flex justify-between items-start">
+                                                                     <div>
+                                                                         <p className="text-white font-bold text-sm">{trip.source} → {trip.destination}</p>
+                                                                         <p className="text-slate-500 text-xs">{new Date(trip.tripDate).toLocaleDateString()}</p>
+                                                                     </div>
+                                                                     <span className={`px-2 py-1 rounded text-xs font-bold ${trip.status === 'COMPLETED' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'}`}>
+                                                                         {trip.status}
+                                                                     </span>
+                                                                 </div>
+                                                             </div>
+                                                         ))
+                                                     ) : (
+                                                         <p className="text-slate-500 text-sm">No trips found</p>
+                                                     )}
+                                                 </div>
+                                             </div>
+
+                                             {/* Feedbacks */}
+                                             <div className="bg-slate-800/50 p-4 rounded-xl">
+                                                 <h4 className="font-bold text-white mb-3 flex items-center gap-2">
+                                                     <MessageSquare className="w-4 h-4 text-amber-400" /> Driver Feedbacks ({driverFeedbacks.length})
+                                                 </h4>
+                                                 <div className="space-y-2 max-h-48 overflow-y-auto">
+                                                     {driverFeedbacks.length > 0 ? (
+                                                         driverFeedbacks.slice(0, 5).map(feedback => (
+                                                             <div key={feedback.id} className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                                                                 <div className="flex items-start gap-3">
+                                                                     <div className="w-10 h-10 bg-amber-500/20 rounded-lg flex items-center justify-center">
+                                                                         <span className="text-amber-400 font-bold">{feedback.rating}</span>
+                                                                     </div>
+                                                                     <div className="flex-1">
+                                                                         <p className="text-white text-sm italic">"{feedback.feedback}"</p>
+                                                                         <p className="text-slate-500 text-xs mt-1">— {feedback.customer?.username}</p>
+                                                                     </div>
+                                                                 </div>
+                                                             </div>
+                                                         ))
+                                                     ) : (
+                                                         <p className="text-slate-500 text-sm">No feedbacks yet</p>
+                                                     )}
+                                                 </div>
+                                             </div>
+
+                                             {/* Chat History */}
+                                             <div className="bg-slate-800/50 p-4 rounded-xl">
+                                                 <h4 className="font-bold text-white mb-3 flex items-center gap-2">
+                                                     <Mail className="w-4 h-4 text-cyan-400" /> Chat History ({messages.length})
+                                                 </h4>
+                                                 <div className="space-y-2 max-h-48 overflow-y-auto">
+                                                     {messages.length > 0 ? (
+                                                         messages.slice(0, 10).map(msg => (
+                                                             <div key={msg.id} className={`p-3 rounded-lg ${msg.senderId === managerProfile?.id ? 'bg-blue-900/20 border border-blue-800/30 ml-8' : 'bg-slate-900/50 border border-slate-700 mr-8'}`}>
+                                                                 <p className="text-white text-sm">{msg.content}</p>
+                                                                 <p className="text-slate-500 text-xs mt-1">{new Date(msg.timestamp).toLocaleString()}</p>
+                                                             </div>
+                                                         ))
+                                                     ) : (
+                                                         <p className="text-slate-500 text-sm">No messages yet</p>
+                                                     )}
+                                                 </div>
+                                             </div>
+                                         </div>
+                                     </>
+                                 ) : (
+                                     <div className="text-center py-8">
+                                         <p className="text-slate-500">No driver assigned to this vehicle</p>
+                                     </div>
+                                 )}
+                             </div>
+                         </div>
+                     </div>
+                 );
+             })()}
         </div>
     );
 };

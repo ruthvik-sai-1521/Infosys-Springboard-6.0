@@ -25,7 +25,7 @@ const DriverVehiclesPage = () => {
 
     // Form Stats
     const [vehicleForm, setVehicleForm] = useState({
-        vehicleNumber: '', type: 'SEDAN', seatCount: 4, fuelLevel: 100, kilometersDriven: 0, 
+        vehicleNumber: '', type: 'SEDAN', seatCount: 3, fuelLevel: 100, kilometersDriven: 0, 
         mileage: 0, fuelCapacity: 0,
         rcDocument: '', insuranceDocument: ''
     });
@@ -64,9 +64,8 @@ const DriverVehiclesPage = () => {
 
     const handleTypeChange = (e) => {
         const type = e.target.value;
-        let seats = 4;
-        if (type === 'SUV') seats = 7;
-        if (type === 'HATCHBACK') seats = 4;
+        let seats = 3; // Default for SEDAN, HATCHBACK, EV
+        if (type === 'SUV') seats = 5;
         setVehicleForm({ ...vehicleForm, type, seatCount: seats });
     };
 
@@ -78,7 +77,7 @@ const DriverVehiclesPage = () => {
             setFormVisible(false);
             fetchVehicles();
             setVehicleForm({
-                vehicleNumber: '', type: 'SEDAN', seatCount: 4, fuelLevel: 100,
+                vehicleNumber: '', type: 'SEDAN', seatCount: 3, fuelLevel: 100,
                 kilometersDriven: 0, mileage: 0, fuelCapacity: 0,
                 rcDocument: '', insuranceDocument: ''
             });

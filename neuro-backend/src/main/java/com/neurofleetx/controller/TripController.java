@@ -19,22 +19,7 @@ public class TripController {
 
     @PostMapping("/create")
     public ResponseEntity<Trip> createTrip(@RequestBody com.neurofleetx.dto.TripRequest request) {
-        Trip trip = new Trip();
-        trip.setSource(request.getSource());
-        trip.setDestination(request.getDestination());
-        trip.setAvailableSeats(request.getAvailableSeats());
-        trip.setFare(request.getFare());
-        trip.setPickupPoints(request.getPickupPoints());
-        trip.setDropPoints(request.getDropPoints());
-        trip.setTotalKm(request.getTotalKm());
-
-        try {
-            trip.setTripDate(java.time.LocalDateTime.parse(request.getTripDate()));
-        } catch (Exception e) {
-            throw new RuntimeException("Invalid date format. Expected standard ISO format.");
-        }
-
-        Trip createdTrip = tripService.createTrip(trip, request.getDriverId(), request.getVehicleId());
+        Trip createdTrip = tripService.createTrip(request);
         return ResponseEntity.ok(createdTrip);
     }
 

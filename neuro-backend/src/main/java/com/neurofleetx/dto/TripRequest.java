@@ -1,6 +1,7 @@
 package com.neurofleetx.dto;
 
 import lombok.Data;
+import java.time.LocalDateTime;
 
 @Data
 public class TripRequest {
@@ -14,4 +15,13 @@ public class TripRequest {
     private Double totalKm;
     private Long driverId;
     private Long vehicleId;
+    private Integer estimatedDuration; // in minutes
+
+    // Helper method to convert string date to LocalDateTime
+    public LocalDateTime getTripDate() {
+        if (tripDate != null) {
+            return LocalDateTime.parse(tripDate);
+        }
+        return null;
+    }
 }
