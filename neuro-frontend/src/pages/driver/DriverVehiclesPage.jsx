@@ -4,12 +4,7 @@ import Navbar from '../../components/Navbar';
 import axios from 'axios';
 import { MapPin, Battery, Droplet, Gauge, PenTool, ArrowLeft, PlusCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { GoogleMap, useJsApiLoader, Marker } from '@react-google-maps/api';
-
-const mapContainerStyle = {
-    width: '100%',
-    height: '100%'
-};
+import { LiveMap } from '../../components/maps';
 
 const defaultCenter = {
     lat: 12.9716,
@@ -25,26 +20,12 @@ const DriverVehiclesPage = () => {
 
     // Form Stats
     const [vehicleForm, setVehicleForm] = useState({
-        vehicleNumber: '', type: 'SEDAN', seatCount: 3, fuelLevel: 100, kilometersDriven: 0, 
+        vehicleNumber: '', type: 'SEDAN', seatCount: 3, fuelLevel: 100, kmsDriven: 0, 
         mileage: 0, fuelCapacity: 0,
-        rcDocument: '', insuranceDocument: ''
+        rcPdfUrl: '', insurancePdfUrl: ''
     });
 
-    const driverId = user?.id || 1; 
-
-    // Google Maps Loader (Lifted to Parent to avoid multiple loads)
-    // IMPORTANT: Replace with valid key or use env var
-    // Only attempt to load Google Maps if a key is present
-    // Assuming googleMapsApiKey is defined elsewhere, e.g., from an environment variable or context
-    const googleMapsApiKey = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || ""; // Placeholder for actual key source
-    const { isLoaded } = useJsApiLoader({
-        id: 'google-map-script',
-        googleMapsApiKey: googleMapsApiKey || "", // Only works if key is valid
-        preventGoogleFontsLoading: true
-    });
-
-    // If no key, treat as not loaded to trigger fallback immediately without error popup
-    const isMapLoaded = googleMapsApiKey ? isLoaded : false;
+    const driverId = user?.id; 
 
     const fetchVehicles = useCallback(async () => {
         try {
@@ -59,18 +40,28 @@ const DriverVehiclesPage = () => {
     }, [driverId]);
 
     useEffect(() => {
-        fetchVehicles();
-    }, [fetchVehicles]);
+        if (driverId) {
+            fetchVehicles();
+        } else {
+             setLoading(false);
+        }
+    }, [fetchVehicles, driverId]);
 
     const handleTypeChange = (e) => {
         const type = e.target.value;
-        let seats = 3; // Default for SEDAN, HATCHBACK, EV
-        if (type === 'SUV') seats = 5;
+        let seats = 5; // Default
+        if (type === 'SUV') seats = 7;
+        else if (type === 'SEDAN' || type === 'HATCHBACK' || type === 'EV') seats = 5;
+        
         setVehicleForm({ ...vehicleForm, type, seatCount: seats });
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (!driverId) {
+            alert("User not authenticated properly. Please reload.");
+            return;
+        }
         try {
             await axios.post(`/api/driver/${driverId}/vehicle/add`, vehicleForm);
             alert("Vehicle Submitted for Approval!");
@@ -78,8 +69,8 @@ const DriverVehiclesPage = () => {
             fetchVehicles();
             setVehicleForm({
                 vehicleNumber: '', type: 'SEDAN', seatCount: 3, fuelLevel: 100,
-                kilometersDriven: 0, mileage: 0, fuelCapacity: 0,
-                rcDocument: '', insuranceDocument: ''
+                kmsDriven: 0, mileage: 0, fuelCapacity: 0,
+                rcPdfUrl: '', insurancePdfUrl: ''
             });
         } catch (error) {
             alert("Error: " + (error.response?.data?.error || error.message));
@@ -145,8 +136,11 @@ const DriverVehiclesPage = () => {
                                 </div>
                                 <div>
                                     <label className="block text-sm text-slate-400 mb-1">Seats</label>
-                                    <input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 bg-opacity-50 text-slate-400" 
-                                        readOnly value={vehicleForm.seatCount} />
+                                    <input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white" 
+                                        min="1" max="60"
+                                        required
+                                        value={vehicleForm.seatCount}
+                                        onChange={e => setVehicleForm({...vehicleForm, seatCount: parseInt(e.target.value)})} />
                                 </div>
                             </div>
                             
@@ -156,8 +150,8 @@ const DriverVehiclesPage = () => {
                                     <Gauge className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 w-4 h-4" />
                                     <input type="number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 pl-10 text-white" 
                                         required
-                                        value={vehicleForm.kilometersDriven}
-                                        onChange={e => setVehicleForm({...vehicleForm, kilometersDriven: parseInt(e.target.value)})} />
+                                        value={vehicleForm.kmsDriven}
+                                        onChange={e => setVehicleForm({...vehicleForm, kmsDriven: parseInt(e.target.value)})} />
                                  </div>
                             </div>
 
@@ -188,16 +182,16 @@ const DriverVehiclesPage = () => {
 
                             <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div>
-                                    <label className="block text-sm text-slate-400 mb-1">RC Document URL</label>
+                                    <label className="block text-sm text-slate-400 mb-1">RC Document URL (PDF/Link)</label>
                                     <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white" placeholder="https://"
-                                        value={vehicleForm.rcDocument}
-                                        onChange={e => setVehicleForm({...vehicleForm, rcDocument: e.target.value})} />
+                                        value={vehicleForm.rcPdfUrl}
+                                        onChange={e => setVehicleForm({...vehicleForm, rcPdfUrl: e.target.value})} />
                                 </div>
                                  <div>
-                                    <label className="block text-sm text-slate-400 mb-1">Insurance Document URL</label>
+                                    <label className="block text-sm text-slate-400 mb-1">Insurance Document URL (PDF/Link)</label>
                                     <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white" placeholder="https://"
-                                        value={vehicleForm.insuranceDocument}
-                                        onChange={e => setVehicleForm({...vehicleForm, insuranceDocument: e.target.value})} />
+                                        value={vehicleForm.insurancePdfUrl}
+                                        onChange={e => setVehicleForm({...vehicleForm, insurancePdfUrl: e.target.value})} />
                                 </div>
                             </div>
 
@@ -224,7 +218,7 @@ const DriverVehiclesPage = () => {
                         </div>
                      :
                      vehicles.map(v => (
-                        <VehicleCard key={v.id} vehicle={v} refresh={fetchVehicles} isMapLoaded={isLoaded} />
+                        <VehicleCard key={v.id} vehicle={v} refresh={fetchVehicles} />
                      ))
                     }
                 </div>
@@ -234,7 +228,7 @@ const DriverVehiclesPage = () => {
 };
 
 // Extracted Component for cleaner logic per card
-const VehicleCard = ({ vehicle, refresh, isMapLoaded }) => {
+const VehicleCard = ({ vehicle, refresh }) => {
     const [simulating, setSimulating] = useState(false);
     const [localVehicle, setLocalVehicle] = useState(vehicle);
     const [intervalId, setIntervalId] = useState(null);
@@ -336,7 +330,7 @@ const VehicleCard = ({ vehicle, refresh, isMapLoaded }) => {
                         <div className="flex items-center gap-2 text-slate-400 text-xs mb-1 uppercase tracking-wider">
                             <Gauge className="w-3 h-3" /> Odometer
                         </div>
-                        <div className="text-xl font-bold text-white">{localVehicle.kilometersDriven ? localVehicle.kilometersDriven.toLocaleString() : 0} <span className="text-sm font-normal text-slate-500">km</span></div>
+                        <div className="text-xl font-bold text-white">{localVehicle.kmsDriven ? localVehicle.kmsDriven.toLocaleString() : 0} <span className="text-sm font-normal text-slate-500">km</span></div>
                     </div>
                     <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800/50">
                         <div className="flex items-center gap-2 text-slate-400 text-xs mb-1 uppercase tracking-wider">
@@ -346,67 +340,40 @@ const VehicleCard = ({ vehicle, refresh, isMapLoaded }) => {
                     </div>
                 </div>
 
-                {/* Google Map Implementation with Fallback */}
-                {/* Fallback Link Logic: clickable container opening Google Maps */}
-                <a 
-                    href={`https://www.google.com/maps/search/?api=1&query=${mapCenter.lat},${mapCenter.lng}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block h-48 bg-slate-900 rounded-xl relative overflow-hidden group border border-slate-800 cursor-pointer"
-                >
+                {/* LiveMap Implementation */}
+                {/* Clickable container opening details if needed, but LiveMap handles its own interaction too */}
+                <div className="block h-48 bg-slate-900 rounded-xl relative overflow-hidden group border border-slate-800">
                     {/* Status Badge */}
                     <div className={`absolute top-3 left-3 z-20 px-3 py-1 rounded text-xs font-mono text-emerald-400 border border-emerald-500/30 flex items-center gap-2 transition-all ${simulating ? 'bg-emerald-950/90 border-emerald-500 shadow-lg shadow-emerald-500/20' : 'bg-slate-900/90'}`}>
                         <div className={`w-2 h-2 bg-emerald-500 rounded-full ${simulating ? 'animate-ping' : ''}`}></div> 
                         {simulating ? 'LIVE TRACKING ACTIVE' : 'Vehicle Stationary'}
                     </div>
 
-                    {/* Button Overlay */}
-                    <div className="absolute top-3 right-3 z-30 bg-slate-900/80 hover:bg-black text-white px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-700 backdrop-blur-md flex items-center gap-2 transition-all shadow-lg group-hover:scale-105">
-                         <MapPin className="w-3 h-3 text-red-500" /> Open Maps
-                    </div>
-
-                    {/* Map Content */}
-                    <div className="absolute inset-0 flex items-center justify-center bg-slate-900 group-hover:scale-105 transition-transform duration-700">
-                         {isMapLoaded ? (
-                            <div className="absolute inset-0 pointer-events-none opacity-50"> 
-                                <GoogleMap
-                                    mapContainerStyle={{width: '100%', height: '100%'}}
-                                    center={mapCenter}
-                                    zoom={14}
-                                    options={{
-                                        disableDefaultUI: true, draggable: false, zoomControl: false,
-                                        styles: [
-                                            { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
-                                            { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
-                                            { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
-                                            { featureType: "road", elementType: "geometry", stylers: [{ color: "#38414e" }] }
-                                        ]
-                                    }}
-                                >
-                                    <Marker position={mapCenter} icon={{ path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z", fillColor: "#ef4444", fillOpacity: 1, strokeWeight: 0, scale: 1.5 }} />
-                                </GoogleMap>
-                            </div>
-                        ) : (
-                            // Clean Fallback - No "Error" text, just a visual map-like gradient
-                            <div className="absolute inset-0 bg-slate-900">
-                                <div className="absolute inset-0 opacity-20" style={{
-                                    backgroundImage: 'radial-gradient(circle at 50% 50%, #334155 1px, transparent 1px)',
-                                    backgroundSize: '20px 20px'
-                                }}></div>
-                                <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-slate-950/50"></div>
-                            </div>
-                        )}
+                    <div className="absolute inset-0 bg-slate-900 text-white">
+                         <LiveMap 
+                            center={mapCenter}
+                            zoom={14}
+                            vehicles={localVehicle.currentLocation ? [{
+                                id: localVehicle.id,
+                                vehicleNumber: localVehicle.vehicleNumber,
+                                currentLocation: localVehicle.currentLocation,
+                                status: localVehicle.status,
+                                type: localVehicle.type,
+                                model: localVehicle.model
+                            }] : []}
+                            className="h-full w-full"
+                         />
                     </div>
 
                     {/* Address Text Overlay */}
-                    <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-slate-950 via-slate-900/80 to-transparent pointer-events-none">
+                    <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-slate-950 via-slate-900/80 to-transparent pointer-events-none z-[1000]">
                         <div className="flex items-center gap-2 text-xs text-slate-300">
                             <MapPin className="w-3 h-3 text-slate-400" />
                             {localVehicle.currentLocation || "Location Unavailable"}
                             {simulating && <span className="text-emerald-400 text-[10px] ml-2 animate-pulse">• Updating...</span>}
                         </div>
                     </div>
-                </a>
+                </div>
             </div>
         </div>
     );

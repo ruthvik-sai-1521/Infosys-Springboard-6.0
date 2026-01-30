@@ -37,8 +37,9 @@ public class BookingService {
         }
 
         // Check availability of specific seats
-        List<Booking> existingBookings = bookingRepository.findByTripId(tripId);
-        for (Booking b : existingBookings) {
+        List<Booking> bookings = bookingRepository.findByTripIdOrderByIdDesc(tripId); // Changed from existingBookings
+                                                                                      // and tripId
+        for (Booking b : bookings) { // Changed from existingBookings
             String booked = b.getSeatNumbers();
             if (booked != null) {
                 for (String s : seatNumbers) {
@@ -83,14 +84,19 @@ public class BookingService {
     }
 
     public List<Booking> getBookingsForTrip(Long tripId) {
-        return bookingRepository.findByTripId(tripId);
+        return bookingRepository.findByTripIdOrderByIdDesc(tripId);
     }
 
-    public List<Booking> getBookingsForCustomer(Long customerId) {
-        return bookingRepository.findByCustomerId(customerId);
+    public List<Booking> getCustomerBookings(Long customerId) {
+        return bookingRepository.findByCustomerIdOrderByIdDesc(customerId);
     }
 
     public List<Booking> getAllBookings() {
-        return bookingRepository.findAll();
+        return bookingRepository.findAll(
+                org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "id"));
+    }
+
+    public Booking getBookingById(Long bookingId) {
+        return bookingRepository.findById(bookingId).orElse(null);
     }
 }

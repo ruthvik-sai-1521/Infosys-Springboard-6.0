@@ -88,17 +88,33 @@ public class DriverController {
         }).orElse(ResponseEntity.badRequest().body(Map.of("error", "Driver not found")));
     }
 
+    @GetMapping("/{driverId}/bookings")
+    public List<Booking> getDriverBookings(@PathVariable Long driverId) {
+        return bookingRepository.findByDriverIdOrderByIdDesc(driverId);
+    }
+
+    // Restore this endpoint for frontend compatibility
     @GetMapping("/{driverId}/trips")
     public List<Booking> getDriverTrips(@PathVariable Long driverId) {
-        return bookingRepository.findByDriverId(driverId);
+        return bookingRepository.findByDriverIdOrderByIdDesc(driverId);
+    }
+
+    // --- REVENUE & ANALYTICS --- //
+
+    @GetMapping("/{driverId}/revenue")
+    public ResponseEntity<Map<String, Object>> getDriverRevenue(@PathVariable Long driverId) {
+        List<Booking> trips = bookingRepository.findByDriverIdOrderByIdDesc(driverId);
+        double totalRevenue = trips.stream()
+                .filter(b -> "COMPLETED".equals(b.getStatus()))
+                .mapToDouble(Booking::getFare)
+                .sum();
+        return ResponseEntity.ok(Map.of("totalRevenue", totalRevenue));
     }
 
     @GetMapping("/{driverId}/vehicles")
     public List<Vehicle> getDriverVehicles(@PathVariable Long driverId) {
-        User driver = userRepository.findById(driverId).orElse(null);
-        if (driver == null)
-            return List.of();
-        return vehicleRepository.findByDriver(driver);
+        // Use ID directly for robustness
+        return vehicleRepository.findByDriverId(driverId);
     }
 
     @Autowired
@@ -124,7 +140,7 @@ public class DriverController {
 
     @GetMapping("/{driverId}/analytics")
     public Map<String, Object> getDriverAnalytics(@PathVariable Long driverId) {
-        List<Booking> trips = bookingRepository.findByDriverId(driverId);
+        List<Booking> trips = bookingRepository.findByDriverIdOrderByIdDesc(driverId);
         double earnings = trips.stream().filter(b -> "COMPLETED".equals(b.getStatus())).mapToDouble(Booking::getFare)
                 .sum();
         long completedTrips = trips.stream().filter(b -> "COMPLETED".equals(b.getStatus())).count();

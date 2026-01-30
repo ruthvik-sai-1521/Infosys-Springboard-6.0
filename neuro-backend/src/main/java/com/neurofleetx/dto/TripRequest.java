@@ -13,6 +13,7 @@ public class TripRequest {
     private String pickupPoints;
     private String dropPoints;
     private Double totalKm;
+    private String estimatedReachingTime; // e.g. "5 Hours" or "8:30 PM"
     private Long driverId;
     private Long vehicleId;
     private Integer estimatedDuration; // in minutes

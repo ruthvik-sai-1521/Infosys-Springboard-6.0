@@ -2,6 +2,7 @@ package com.neurofleetx.model;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import java.time.LocalDateTime;
 
 @Entity
 @Data
@@ -60,26 +61,51 @@ public class Vehicle {
     @JoinColumn(name = "driver_id")
     private User driver;
 
+    // Live Tracking Fields
+    @Column(name = "last_known_latitude")
+    private Double lastKnownLatitude;
+
+    @Column(name = "last_known_longitude")
+    private Double lastKnownLongitude;
+
+    @Column(name = "base_latitude")
+    private Double baseLatitude;
+
+    @Column(name = "base_longitude")
+    private Double baseLongitude;
+
+    @Column(name = "base_address")
+    private String baseAddress;
+
+    @Column(name = "vehicle_status")
+    private String vehicleStatus = "IDLE"; // IDLE, IN_TRANSIT, MAINTENANCE
+
+    @Column(name = "last_location_update")
+    private LocalDateTime lastLocationUpdate;
+
     /**
      * Automatically set seat count based on vehicle type before persisting
      */
     @PrePersist
     @PreUpdate
     public void setSeatCountFromType() {
-        if (this.type != null) {
+        if (this.seatCount == null && this.type != null) {
             String vehicleType = this.type.toUpperCase();
             switch (vehicleType) {
                 case "SUV":
-                    this.seatCount = 5;
+                    this.seatCount = 7; // Updated default for SUV
                     break;
                 case "SEDAN":
+                    this.seatCount = 5;
+                    break;
                 case "HATCHBACK":
+                    this.seatCount = 5;
+                    break;
                 case "EV":
-                    this.seatCount = 3;
+                    this.seatCount = 5;
                     break;
                 default:
-                    // Default to 3 seats for unknown types
-                    this.seatCount = 3;
+                    this.seatCount = 4;
                     break;
             }
         }

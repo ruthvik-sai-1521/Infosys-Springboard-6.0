@@ -2,11 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Navbar from '../../components/Navbar';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
-import { LayoutDashboard, Car, Users, MessageSquare, Wrench, Search, Phone, Mail, AlertTriangle, Map as MapIcon, UserCircle, Briefcase, Building, MapPin } from 'lucide-react';
-import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
+import { LayoutDashboard, Car, Users, MessageSquare, Search, Phone, Mail, AlertTriangle, Map as MapIcon, UserCircle, Briefcase, Building, MapPin } from 'lucide-react';
+import { LiveMap } from '../../components/maps';
 
 const defaultCenter = { lat: 12.9716, lng: 77.5946 };
-const mapContainerStyle = { width: '100%', height: '100%' };
 
 const ManagerDashboard = () => {
     const { user: authUser } = useAuth(); 
@@ -25,13 +24,6 @@ const ManagerDashboard = () => {
     const [mapSearch, setMapSearch] = useState("");
     const [mapCenter, setMapCenter] = useState(defaultCenter);
     const [selectedMapVehicle, setSelectedMapVehicle] = useState(null);
-
-    // Google Maps Loader
-    const { isLoaded } = useJsApiLoader({
-        id: 'google-map-script',
-        googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY || "", 
-        preventGoogleFontsLoading: true
-    });
 
     // Contact Modal
     const [contactModalOpen, setContactModalOpen] = useState(false);
@@ -264,85 +256,71 @@ const ManagerDashboard = () => {
         );
     };
 
-    const renderMap = () => (
-        <div className="animate-fade-in h-[80vh] flex flex-col gap-4">
-            <div className="flex justify-between items-center bg-slate-900 p-4 rounded-xl border border-slate-800">
-                <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                    <MapIcon className="w-6 h-6 text-purple-400" /> Live Fleet Tracking
-                </h2>
-                <div className="relative w-96">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                    <input 
-                        type="text" 
-                        placeholder="Search Driver or Vehicle Number..." 
-                        className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-sm text-white focus:border-purple-500 outline-none"
-                        value={mapSearch}
-                        onChange={e => setMapSearch(e.target.value)}
+    const renderMap = () => {
+        // Prepare vehicle data for LiveMap
+        const mapVehicles = vehicles
+            .filter(v => v.currentLocation)
+            .map(v => {
+                const [lat, lng] = v.currentLocation.split(',').map(Number);
+                if (isNaN(lat) || isNaN(lng)) return null;
+                return {
+                    id: v.id,
+                    vehicleNumber: v.vehicleNumber,
+                    model: v.model,
+                    type: v.type,
+                    status: v.status,
+                    location: { lat, lng },
+                    driverName: v.driverName || 'Unassigned'
+                };
+            })
+            .filter(Boolean);
+
+        return (
+            <div className="animate-fade-in h-[80vh] flex flex-col gap-4">
+                <div className="flex justify-between items-center bg-slate-900 p-4 rounded-xl border border-slate-800">
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                        <MapIcon className="w-6 h-6 text-purple-400" /> Live Fleet Tracking
+                    </h2>
+                    <div className="relative w-96">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                        <input 
+                            type="text" 
+                            placeholder="Search Driver or Vehicle Number..." 
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-sm text-white focus:border-purple-500 outline-none"
+                            value={mapSearch}
+                            onChange={e => setMapSearch(e.target.value)}
+                        />
+                    </div>
+                </div>
+    
+                <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden relative flex-1">
+                    <LiveMap 
+                        vehicles={mapVehicles} 
+                        center={selectedMapVehicle ? {
+                            lat: Number(selectedMapVehicle.currentLocation.split(',')[0]),
+                            lng: Number(selectedMapVehicle.currentLocation.split(',')[1]) 
+                        } : undefined}
+                        className="h-full w-full"
                     />
+                    
+                    {/* Overlay Info box if search found */}
+                    {selectedMapVehicle && (
+                         <div className="absolute bottom-4 left-4 bg-slate-900/90 p-4 rounded-xl border border-slate-700 shadow-2xl backdrop-blur-sm z-[1000] w-80">
+                             <div className="flex justify-between items-start mb-2">
+                                 <h3 className="font-bold text-white text-lg">{selectedMapVehicle.vehicleNumber}</h3>
+                                 <span className="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded">{selectedMapVehicle.status}</span>
+                             </div>
+                             <p className="text-slate-400 text-sm mb-1">Driver: <span className="text-white">{selectedMapVehicle.driverName || "Unassigned"}</span></p>
+                             <p className="text-slate-400 text-sm mb-3">Model: {selectedMapVehicle.model} ({selectedMapVehicle.type})</p>
+                             <p className="text-xs text-slate-500 flex items-center gap-1">
+                                 <MapPin className="w-3 h-3" /> Location: {selectedMapVehicle.currentLocation || "Unknown"}
+                             </p>
+                         </div>
+                    )}
                 </div>
             </div>
-
-            <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden relative flex-1">
-                {isLoaded ? (
-                    <GoogleMap
-                        mapContainerStyle={mapContainerStyle}
-                        center={mapCenter}
-                        zoom={14}
-                        options={{
-                            disableDefaultUI: false,
-                            styles: [
-                                { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
-                                { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
-                                { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
-                                { featureType: "road", elementType: "geometry", stylers: [{ color: "#38414e" }] }
-                            ]
-                        }}
-                    >
-                        {/* Show Marker for Selected Vehicle */}
-                        {selectedMapVehicle && (
-                            <Marker 
-                                position={mapCenter} 
-                                title={selectedMapVehicle.vehicleNumber}
-                            />
-                        )}
-                        
-                        {/* Show All Vehicles (Optional: you can map all vehicles to markers here) */}
-                        {!selectedMapVehicle && vehicles.map(v => {
-                            if(!v.currentLocation) return null;
-                            const [lat, lng] = v.currentLocation.split(',').map(Number);
-                            if(isNaN(lat) || isNaN(lng)) return null;
-                            return <Marker key={v.id} position={{lat, lng}} title={v.vehicleNumber} />;
-                        })}
-
-                    </GoogleMap>
-                ) : (
-                    <div className="w-full h-full bg-slate-800 flex items-center justify-center">
-                         <div className="text-center">
-                             <div className="w-24 h-24 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
-                                 <MapPin className="w-10 h-10 text-blue-500" />
-                             </div>
-                             <p className="text-slate-400 font-bold mb-2">Map Loading / API Key Missing</p>
-                         </div>
-                    </div>
-                )}
-                
-                {/* Overlay Info box if search found */}
-                {selectedMapVehicle && (
-                     <div className="absolute bottom-4 left-4 bg-slate-900/90 p-4 rounded-xl border border-slate-700 shadow-2xl backdrop-blur-sm z-10 w-80">
-                         <div className="flex justify-between items-start mb-2">
-                             <h3 className="font-bold text-white text-lg">{selectedMapVehicle.vehicleNumber}</h3>
-                             <span className="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded">{selectedMapVehicle.status}</span>
-                         </div>
-                         <p className="text-slate-400 text-sm mb-1">Driver: <span className="text-white">{selectedMapVehicle.driverName || "Unassigned"}</span></p>
-                         <p className="text-slate-400 text-sm mb-3">Model: {selectedMapVehicle.model} ({selectedMapVehicle.type})</p>
-                         <p className="text-xs text-slate-500 flex items-center gap-1">
-                             <MapPin className="w-3 h-3" /> Location: {selectedMapVehicle.currentLocation || "Unknown"}
-                         </p>
-                     </div>
-                )}
-            </div>
-        </div>
-    );
+        );
+    };
 
     // Handle vehicle click to open detail modal
     const handleVehicleClick = async (vehicle) => {
@@ -678,6 +656,16 @@ const ManagerDashboard = () => {
         );
     };
 
+    const SidebarItem = ({ icon, label, active, onClick }) => (
+        <button 
+            onClick={onClick}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all ${active ? 'bg-blue-600 shadow-lg shadow-blue-900/40 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
+        >
+            <div className={`w-5 h-5 ${active ? 'text-white' : 'text-slate-500 group-hover:text-white'}`}>{icon}</div>
+            {label}
+        </button>
+    );
+
     return (
         <div className="min-h-screen bg-slate-950 text-white flex font-sans">
              {/* SIDEBAR */}
@@ -722,7 +710,6 @@ const ManagerDashboard = () => {
              {contactModalOpen && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
                     <div className="bg-slate-900 w-full max-w-md rounded-2xl border border-slate-700 shadow-2xl p-6 relative">
-                         {/* ... modal content reused ... */}
                         <button onClick={() => setContactModalOpen(false)} className="absolute top-4 right-4 text-slate-500 hover:text-white">✕</button>
                         <h3 className="text-lg font-bold text-white mb-2">Message {selectedContactUser?.username}</h3>
                         <div className="flex gap-4 mb-6">
@@ -798,103 +785,63 @@ const ManagerDashboard = () => {
                                              </h3>
                                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                                  <div>
-                                                     <p className="text-slate-500 text-xs uppercase mb-1">Name</p>
+                                                     <p className="text-slate-500 text-xs mb-1">Name</p>
                                                      <p className="text-white font-bold">{driver.username}</p>
                                                  </div>
                                                  <div>
-                                                     <p className="text-slate-500 text-xs uppercase mb-1">Email</p>
-                                                     <p className="text-white font-bold text-sm truncate">{driver.email}</p>
+                                                     <p className="text-slate-500 text-xs mb-1">Email</p>
+                                                     <p className="text-white font-bold truncate">{driver.email}</p>
                                                  </div>
                                                  <div>
-                                                     <p className="text-slate-500 text-xs uppercase mb-1">Total Earnings</p>
-                                                     <p className="text-emerald-400 font-bold text-lg">₹{driver.totalEarnings?.toLocaleString() || 0}</p>
+                                                     <p className="text-slate-500 text-xs mb-1">Phone</p>
+                                                     <p className="text-white font-bold">{driver.mobileNumber}</p>
                                                  </div>
                                                  <div>
-                                                     <p className="text-slate-500 text-xs uppercase mb-1">Trips Completed</p>
-                                                     <p className="text-white font-bold text-lg">{driver.completedTripsCount || 0}</p>
-                                                 </div>
-                                             </div>
-                                         </div>
-
-                                         {/* Tabs for Trips, Feedbacks, Messages */}
-                                         <div className="space-y-4">
-                                             {/* Trips */}
-                                             <div className="bg-slate-800/50 p-4 rounded-xl">
-                                                 <h4 className="font-bold text-white mb-3 flex items-center gap-2">
-                                                     <Car className="w-4 h-4 text-purple-400" /> Recent Trips ({driverTrips.length})
-                                                 </h4>
-                                                 <div className="space-y-2 max-h-48 overflow-y-auto">
-                                                     {driverTrips.length > 0 ? (
-                                                         driverTrips.slice(0, 5).map(trip => (
-                                                             <div key={trip.id} className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
-                                                                 <div className="flex justify-between items-start">
-                                                                     <div>
-                                                                         <p className="text-white font-bold text-sm">{trip.source} → {trip.destination}</p>
-                                                                         <p className="text-slate-500 text-xs">{new Date(trip.tripDate).toLocaleDateString()}</p>
-                                                                     </div>
-                                                                     <span className={`px-2 py-1 rounded text-xs font-bold ${trip.status === 'COMPLETED' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'}`}>
-                                                                         {trip.status}
-                                                                     </span>
-                                                                 </div>
-                                                             </div>
-                                                         ))
-                                                     ) : (
-                                                         <p className="text-slate-500 text-sm">No trips found</p>
-                                                     )}
-                                                 </div>
-                                             </div>
-
-                                             {/* Feedbacks */}
-                                             <div className="bg-slate-800/50 p-4 rounded-xl">
-                                                 <h4 className="font-bold text-white mb-3 flex items-center gap-2">
-                                                     <MessageSquare className="w-4 h-4 text-amber-400" /> Driver Feedbacks ({driverFeedbacks.length})
-                                                 </h4>
-                                                 <div className="space-y-2 max-h-48 overflow-y-auto">
-                                                     {driverFeedbacks.length > 0 ? (
-                                                         driverFeedbacks.slice(0, 5).map(feedback => (
-                                                             <div key={feedback.id} className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
-                                                                 <div className="flex items-start gap-3">
-                                                                     <div className="w-10 h-10 bg-amber-500/20 rounded-lg flex items-center justify-center">
-                                                                         <span className="text-amber-400 font-bold">{feedback.rating}</span>
-                                                                     </div>
-                                                                     <div className="flex-1">
-                                                                         <p className="text-white text-sm italic">"{feedback.feedback}"</p>
-                                                                         <p className="text-slate-500 text-xs mt-1">— {feedback.customer?.username}</p>
-                                                                     </div>
-                                                                 </div>
-                                                             </div>
-                                                         ))
-                                                     ) : (
-                                                         <p className="text-slate-500 text-sm">No feedbacks yet</p>
-                                                     )}
-                                                 </div>
-                                             </div>
-
-                                             {/* Chat History */}
-                                             <div className="bg-slate-800/50 p-4 rounded-xl">
-                                                 <h4 className="font-bold text-white mb-3 flex items-center gap-2">
-                                                     <Mail className="w-4 h-4 text-cyan-400" /> Chat History ({messages.length})
-                                                 </h4>
-                                                 <div className="space-y-2 max-h-48 overflow-y-auto">
-                                                     {messages.length > 0 ? (
-                                                         messages.slice(0, 10).map(msg => (
-                                                             <div key={msg.id} className={`p-3 rounded-lg ${msg.senderId === managerProfile?.id ? 'bg-blue-900/20 border border-blue-800/30 ml-8' : 'bg-slate-900/50 border border-slate-700 mr-8'}`}>
-                                                                 <p className="text-white text-sm">{msg.content}</p>
-                                                                 <p className="text-slate-500 text-xs mt-1">{new Date(msg.timestamp).toLocaleString()}</p>
-                                                             </div>
-                                                         ))
-                                                     ) : (
-                                                         <p className="text-slate-500 text-sm">No messages yet</p>
-                                                     )}
+                                                     <p className="text-slate-500 text-xs mb-1">Avg Rating</p>
+                                                     <p className="text-amber-400 font-bold">4.8/5</p>
                                                  </div>
                                              </div>
                                          </div>
                                      </>
                                  ) : (
-                                     <div className="text-center py-8">
-                                         <p className="text-slate-500">No driver assigned to this vehicle</p>
+                                     <div className="p-6 bg-slate-800/30 rounded-xl border border-slate-700 border-dashed text-center mb-6">
+                                         <p className="text-slate-500 italic">No driver currently assigned to this vehicle.</p>
                                      </div>
                                  )}
+
+                                 {/* Messages Section */}
+                                 <div className="bg-slate-800/50 p-6 rounded-xl border border-slate-700">
+                                     <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                                         <MessageSquare className="w-5 h-5 text-slate-400" /> Communication History
+                                     </h3>
+                                     
+                                     {messages.length > 0 ? (
+                                         <div className="space-y-3 max-h-60 overflow-y-auto mb-4">
+                                             {messages.map(msg => (
+                                                 <div key={msg.id} className={`p-3 rounded-lg max-w-[80%] ${msg.senderId === managerProfile?.id ? 'ml-auto bg-blue-600 text-white' : 'bg-slate-700 text-slate-200'}`}>
+                                                     <p className="text-sm">{msg.content}</p>
+                                                     <p className="text-[10px] opacity-70 mt-1 text-right">{new Date(msg.sentAt).toLocaleString()}</p>
+                                                 </div>
+                                             ))}
+                                         </div>
+                                     ) : (
+                                         <p className="text-slate-500 text-center py-4">No recent messages with this driver.</p>
+                                     )}
+
+                                     <button 
+                                         disabled={!driver}
+                                         onClick={() => {
+                                             if(driver) {
+                                                 setVehicleModalOpen(false);
+                                                 setSelectedContactUser(driver);
+                                                 setContactModalOpen(true);
+                                             }
+                                         }}
+                                         className={`w-full py-3 rounded-lg font-bold transition-colors ${driver ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}
+                                     >
+                                         Send New Message
+                                     </button>
+                                 </div>
                              </div>
                          </div>
                      </div>
@@ -903,19 +850,5 @@ const ManagerDashboard = () => {
         </div>
     );
 };
-
-const SidebarItem = ({ icon, label, active, onClick }) => (
-    <button 
-        onClick={onClick}
-        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${
-            active 
-            ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' 
-            : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-        }`}
-    >
-        {React.cloneElement(icon, { size: 18 })}
-        {label}
-    </button>
-);
 
 export default ManagerDashboard;

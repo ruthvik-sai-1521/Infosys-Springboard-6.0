@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 
+@SuppressWarnings("unused")
 @RestController
 @RequestMapping("/api/trips")
 @CrossOrigin(origins = "*") // Update with specific frontend URL in production

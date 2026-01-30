@@ -58,4 +58,43 @@ public class Trip {
     @ManyToOne
     @JoinColumn(name = "vehicle_id")
     private Vehicle vehicle;
+
+    // Location Coordinates
+    @Column(name = "source_latitude")
+    private Double sourceLatitude;
+
+    @Column(name = "source_longitude")
+    private Double sourceLongitude;
+
+    @Column(name = "source_address", columnDefinition = "TEXT")
+    private String sourceAddress;
+
+    @Column(name = "destination_latitude")
+    private Double destinationLatitude;
+
+    @Column(name = "destination_longitude")
+    private Double destinationLongitude;
+
+    @Column(name = "destination_address", columnDefinition = "TEXT")
+    private String destinationAddress;
+
+    // Route Data
+    @Column(name = "selected_route_polyline", columnDefinition = "TEXT")
+    private String selectedRoutePolyline; // Encoded polyline from Google Maps
+
+    @Column(name = "selected_route_distance")
+    private Double selectedRouteDistance; // in kilometers
+
+    @Column(name = "selected_route_duration")
+    private Integer selectedRouteDuration; // in minutes
+
+    // Simulation Tracking
+    @Column(name = "simulation_status")
+    private String simulationStatus = "NOT_STARTED"; // NOT_STARTED, RUNNING, PAUSED, COMPLETED
+
+    @Column(name = "simulation_progress")
+    private Integer simulationProgress = 0; // 0-100 percentage
+
+    @Column(name = "current_simulation_index")
+    private Integer currentSimulationIndex = 0; // Current polyline point index
 }

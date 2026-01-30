@@ -9,6 +9,9 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Configure axios defaults
+  axios.defaults.baseURL = 'http://localhost:8080';
+
   // Initialize state from localStorage on load
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -29,8 +32,8 @@ export const AuthProvider = ({ children }) => {
         role 
       });
       
-      const { token, username, role: userRole } = response.data;
-      const userData = { username, role: userRole };
+      const { token, id, username, email: userEmail, role: userRole } = response.data;
+      const userData = { id, username, email: userEmail, role: userRole };
 
       localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(userData));

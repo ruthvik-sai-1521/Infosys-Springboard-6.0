@@ -2,12 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import Navbar from '../../components/Navbar';
 import axios from 'axios';
-import { Calendar, Clock, MapPin, ArrowLeft, PlusCircle, Users, Phone, X } from 'lucide-react';
+import { Calendar, Clock, MapPin, ArrowLeft, PlusCircle, Users, Phone, X, Route, Gauge } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { GoogleMap, DirectionsRenderer, useJsApiLoader } from '@react-google-maps/api';
-
-const mapContainerStyle = { width: '100%', height: '100%' };
-const defaultCenter = { lat: 12.9716, lng: 77.5946 }; // Bangalore
+import { RouteSelector, VehicleTracker, LiveMap } from '../../components/maps';
+import routeService from '../../services/routeService';
 
 const DriverTripsPage = () => {
     const { user } = useAuth();
@@ -23,24 +21,39 @@ const DriverTripsPage = () => {
     const [loadingBookings, setLoadingBookings] = useState(false);
     const [occupiedSeats, setOccupiedSeats] = useState([]);
 
-    // Map & Route State
+    // Route Selection State
+    const [isRouteModalOpen, setIsRouteModalOpen] = useState(false);
+    const [routeTrip, setRouteTrip] = useState(null);
+    const [availableRoutes, setAvailableRoutes] = useState([]);
+    const [selectedRoute, setSelectedRoute] = useState(null);
+    const [loadingRoutes, setLoadingRoutes] = useState(false);
+
+    // Live Tracking State
+    const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
+    const [trackingTrip, setTrackingTrip] = useState(null);
+
+    // Map & Route State (for viewing route)
     const [isMapModalOpen, setIsMapModalOpen] = useState(false);
     const [mapTrip, setMapTrip] = useState(null);
-    const [directionsResponse, setDirectionsResponse] = useState(null);
+    const [mapRouteData, setMapRouteData] = useState(null);
 
-    const { isLoaded } = useJsApiLoader({
-        id: 'google-map-script',
-        googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY || "",
-    });
-
-    // ... (Existing State: tripForm, etc.)
     const [tripForm, setTripForm] = useState({
-        source: '', destination: '', date: '', time: '', availableSeats: 3, fare: 0, vehicleId: '', estimatedDuration: ''
+        source: '',
+        destination: '',
+        date: '',
+        time: '',
+        availableSeats: 3,
+        vehicleId: '',
+        estimatedReachingTime: '', 
+        estimatedDuration: '',
+        pickupPoints: '', 
+        dropPoints: '', 
+        totalKm: '', 
+        description: '' 
     });
 
-    const driverId = user?.id || 1;
+    const driverId = user?.id;
 
-    // ... (Existing callback: fetchTrips, fetchVehicles)
     const fetchTrips = useCallback(async () => {
         try {
             const res = await axios.get(`/api/trips/driver/${driverId}`);
@@ -63,7 +76,6 @@ const DriverTripsPage = () => {
         fetchVehicles();
     }, [fetchTrips, fetchVehicles, activeTab]);
 
-    // ... (Existing: fetchBookingsForTrip, renderDriverSeatView, Fare Calc)
     const fetchBookingsForTrip = async (trip) => {
         setSelectedTrip(trip);
         setLoadingBookings(true);
@@ -71,7 +83,6 @@ const DriverTripsPage = () => {
             const res = await axios.get(`/api/bookings/trip/${trip.id}`);
             setBookings(res.data);
             
-            // Calculate occupied seats
             const taken = res.data.reduce((acc, booking) => {
                 if (booking.seatNumbers) {
                     return [...acc, ...booking.seatNumbers.split(',')];
@@ -87,120 +98,145 @@ const DriverTripsPage = () => {
         setLoadingBookings(false);
     };
 
-    const renderDriverSeatView = (seatNum) => {
-        const s = String(seatNum);
-        const isOccupied = occupiedSeats.includes(s);
-        // Find booking for this seat to show name on hover maybe?
-        const booking = bookings.find(b => b.seatNumbers && b.seatNumbers.split(',').includes(s));
-
-        return (
-            <div 
-                className={`w-12 h-12 rounded-lg border flex items-center justify-center font-bold text-sm transition-all relative group
-                    ${isOccupied ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-slate-800 border-slate-700 text-slate-500 opacity-50'}`}
-            >
-                {seatNum}
-                {isOccupied && (
-                    <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] px-2 py-1 rounded border border-slate-700 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                        {booking?.customer?.username || 'Occupied'}
-                    </div>
-                )}
-            </div>
-        );
-    };
-
-
-    // Automatic Fare Calculation
-    useEffect(() => {
-        if (tripForm.vehicleId && tripForm.totalKm) {
-            const selectedVehicle = vehicles.find(v => String(v.id) === String(tripForm.vehicleId));
-            if (selectedVehicle) {
-                let rate = 0;
-                switch (selectedVehicle.type?.toUpperCase()) {
-                    case 'HATCHBACK': rate = 1.5; break;
-                    case 'SEDAN': rate = 2.0; break;
-                    case 'SUV': rate = 2.5; break;
-                    default: rate = 2.0; // Default or fallback
-                }
-                const calculatedFare = (parseFloat(tripForm.totalKm) * rate).toFixed(2);
-                setTripForm(prev => {
-                    if (prev.fare !== calculatedFare) {
-                        return { ...prev, fare: calculatedFare };
-                    }
-                    return prev;
-                });
-            }
-        }
-    }, [tripForm.vehicleId, tripForm.totalKm, vehicles]);
-
-    const handlePostTrip = async (e) => {
-        e.preventDefault();
-        try {
-            // Get the selected vehicle to retrieve its seat count
-            const selectedVehicle = vehicles.find(v => String(v.id) === String(tripForm.vehicleId));
-            const availableSeats = selectedVehicle?.seatCount || 3; // Default to 3 if not found
+    const handleInputChange = (e) => {
+        const { name, value } = e.target;
+        setTripForm(prev => {
+            const newForm = { ...prev, [name]: value };
             
-            const tripPayload = {
-                driverId: user?.id || 1, // Ensure driverId is valid
-                vehicleId: tripForm.vehicleId,
-                source: tripForm.source,
-                destination: tripForm.destination,
-                tripDate: `${tripForm.date}T${tripForm.time}:00`,
-                fare: parseFloat(tripForm.fare),
-                availableSeats: availableSeats, // Use vehicle's actual seat count
-                pickupPoints: tripForm.pickupPoints,
-                dropPoints: tripForm.dropPoints,
-                totalKm: tripForm.totalKm,
-                estimatedDuration: tripForm.estimatedDuration ? parseInt(tripForm.estimatedDuration) : null
-            };
-            await axios.post(`/api/trips/create`, tripPayload);
-            alert("Trip Posted Successfully!");
-            setIsPostModalOpen(false);
-            fetchTrips();
-        } catch (error) {
-            alert("Submission Failed: " + (error.response?.data?.error || error.message));
-        }
+            // If vehicle changes, update max seats
+            if (name === 'vehicleId') {
+                const selected = vehicles.find(v => v.id === Number(value));
+                if (selected) {
+                    newForm.availableSeats = selected.seatCount || 5; 
+                }
+            }
+            return newForm;
+        });
     };
 
-    // AI Route Suggestion
-    const handleGetAIRoute = async () => {
-        if (!tripForm.source || !tripForm.destination) {
-            alert("Please enter source and destination first.");
+    const handlePostTrip = async () => {
+        if (!tripForm.source || !tripForm.destination || !tripForm.date || !tripForm.time || !tripForm.vehicleId) {
+            alert("Please fill all required fields (From, To, Date, Time, Vehicle).");
             return;
         }
+
+        const tripDate = `${tripForm.date}T${tripForm.time}:00`;
+
+        const payload = {
+            driverId,
+            vehicleId: Number(tripForm.vehicleId),
+            source: tripForm.source,
+            destination: tripForm.destination,
+            tripDate: tripDate,
+            availableSeats: parseInt(tripForm.availableSeats) || 3,
+            estimatedDuration: tripForm.estimatedDuration ? parseInt(tripForm.estimatedDuration) : 60,
+            estimatedReachingTime: tripForm.estimatedReachingTime || '',
+            pickupPoints: tripForm.pickupPoints || '',
+            dropPoints: tripForm.dropPoints || '',
+            totalKm: parseFloat(tripForm.totalKm) || 0
+        };
+
         try {
-            const res = await axios.get(`/api/routes/suggest?source=${tripForm.source}&destination=${tripForm.destination}`);
-            if (res.data) {
-                const route = res.data;
-                const distanceMeters = route.distanceMeters || 0;
-                const duration = route.duration || "0s";
-                const km = (distanceMeters / 1000).toFixed(1);
-                
-                // Parse duration from seconds to minutes
-                const durationInSeconds = parseInt(duration.replace('s', ''));
-                const durationInMinutes = Math.ceil(durationInSeconds / 60);
-                
-                alert(`AI Suggested Route:\nDistance: ${km} km\nDuration: ${durationInMinutes} minutes`);
-                
-                // Auto-fill form
-                setTripForm(prev => ({
-                    ...prev,
-                    totalKm: km,
-                    estimatedReachingTime: `${durationInMinutes} minutes`,
-                    estimatedDuration: durationInMinutes
-                }));
-            }
+            await axios.post('/api/trips/create', payload);
+            alert("Trip posted successfully! Fare calculated automatically based on vehicle type.");
+            setIsPostModalOpen(false);
+            setTripForm({
+                source: '',
+                destination: '',
+                date: '',
+                time: '',
+                availableSeats: 3,
+                vehicleId: '',
+                estimatedReachingTime: '',
+                estimatedDuration: '',
+                pickupPoints: '',
+                dropPoints: '',
+                totalKm: '',
+                description: ''
+            });
+            fetchTrips();
         } catch (err) {
             console.error(err);
-            alert("Failed to get AI route suggestion.");
+            alert("Failed to post trip: " + (err.response?.data?.message || err.message));
         }
     };
 
+    // --- ROUTE SELECTION --- //
+    const handleViewAvailableRoutes = async (trip) => {
+        setRouteTrip(trip);
+        setIsRouteModalOpen(true);
+        setLoadingRoutes(true);
+        setAvailableRoutes([]);
+        setSelectedRoute(null);
+
+        let origin = trip.source;
+        let destination = trip.destination;
+
+        if (trip.pickupPoints && trip.pickupPoints.trim() !== '') {
+            const pickups = trip.pickupPoints.split(',').map(p => p.trim()).filter(p => p);
+            if (pickups.length > 0) origin = pickups[0];
+        }
+
+        if (trip.dropPoints && trip.dropPoints.trim() !== '') {
+            const drops = trip.dropPoints.split(',').map(d => d.trim()).filter(d => d);
+            if (drops.length > 0) destination = drops[drops.length - 1];
+        }
+
+        try {
+            const routes = await routeService.getDirections(origin, destination);
+            setAvailableRoutes(routes);
+        } catch (err) {
+            console.error('Failed to fetch routes:', err);
+            const errorMessage = err.response?.data?.error || err.message || 'Could not load routes';
+            alert(`Route Error: ${errorMessage}. \n\nCheck addresses and try again.`);
+        }
+        setLoadingRoutes(false);
+    };
+
+    const handleSelectRoute = (route) => {
+        setSelectedRoute(route);
+    };
+
+    const handleStartTripWithRoute = async () => {
+        if (!selectedRoute) {
+            alert('Please select a route first.');
+            return;
+        }
+
+        try {
+            // Save selected route
+            await routeService.saveSelectedRoute(routeTrip.id, selectedRoute);
+            
+            // Start trip
+            await axios.post(`/api/trips/${routeTrip.id}/start`);
+            
+            // Start simulation
+            await axios.post(`/api/simulation/start-from-trip`, {
+                tripId: routeTrip.id
+            });
+
+            alert("Trip started! Live tracking is active.");
+            setIsRouteModalOpen(false);
+            fetchTrips();
+            
+            setTimeout(() => {
+                const updatedTrip = trips.find(t => t.id === routeTrip.id);
+                if (updatedTrip) {
+                    handleViewLiveTracking(updatedTrip);
+                }
+            }, 1000);
+        } catch (err) {
+            console.error(err);
+            alert("Failed to start trip.");
+        }
+    };
+
+    // Legacy quick start (compatibility)
     const handleStartTrip = async (trip) => {
         try {
             await axios.post(`/api/trips/${trip.id}/start`);
-            // Start Simulation
-            await axios.post(`/api/simulation/start/${trip.vehicle.id}`);
-            alert("Trip Started! Live tracking is active.");
+            await axios.post(`/api/simulation/start-from-trip`, { tripId: trip.id });
+            alert("Trip started! Live tracking is active.");
             fetchTrips();
         } catch (err) {
             console.error(err);
@@ -209,11 +245,18 @@ const DriverTripsPage = () => {
     };
 
     const handleEndTrip = async (trip) => {
+        if (!window.confirm('Are you sure you want to end this trip?')) {
+            return;
+        }
+
         try {
             await axios.post(`/api/trips/${trip.id}/end`);
-            // Stop Simulation
-            await axios.post(`/api/simulation/stop/${trip.vehicle.id}`);
-            alert("Trip Ended.");
+            // Vehicle might not be in trip object if not refreshed, handle gracefully
+            if (trip.vehicle && trip.vehicle.id) {
+                await axios.post(`/api/simulation/stop`, { vehicleId: trip.vehicle.id });
+            }
+            alert("Trip ended successfully.");
+            setIsTrackingModalOpen(false);
             fetchTrips();
         } catch (err) {
             console.error(err);
@@ -221,56 +264,49 @@ const DriverTripsPage = () => {
         }
     };
 
-    // Calculate Directions for Map
-    const calculateRoute = async (trip) => {
-        if (!isLoaded || !window.google) return;
-        
-        const directionsService = new window.google.maps.DirectionsService();
-        
-        // Parse waypoints from pickup and drop strings
-        const waypoints = [];
-        if (trip.pickupPoints) {
-            trip.pickupPoints.split(',').forEach(p => waypoints.push({ location: p.trim(), stopover: true }));
-        }
-        if (trip.dropPoints) {
-            trip.dropPoints.split(',').forEach(p => waypoints.push({ location: p.trim(), stopover: true }));
-        }
-        
-        try {
-            const results = await directionsService.route({
-                origin: trip.source,
-                destination: trip.destination,
-                waypoints: waypoints,
-                travelMode: window.google.maps.TravelMode.DRIVING,
-            });
-            setDirectionsResponse(results);
-        } catch (err) {
-            console.error("Directions Request failed:", err);
-            alert("Could not load route on map.");
-        }
+    const handleViewLiveTracking = (trip) => {
+        setTrackingTrip(trip);
+        setIsTrackingModalOpen(true);
     };
 
-    const handleViewRoute = (trip) => {
+    const handleViewRoute = async (trip) => {
         setMapTrip(trip);
         setIsMapModalOpen(true);
-        // Delay slightly to ensure modal is mounted or simple call
-        setTimeout(() => calculateRoute(trip), 500);
+        setMapRouteData(null);
+
+        try {
+            const routeDetails = await routeService.getTripRoute(trip.id);
+            if (routeDetails.decodedCoordinates) {
+                 setMapRouteData({
+                    coordinates: routeDetails.decodedCoordinates.map(c => [c.latitude, c.longitude]),
+                    source: {
+                        lat: routeDetails.sourceCoordinates?.latitude,
+                        lng: routeDetails.sourceCoordinates?.longitude,
+                        name: routeDetails.sourceCoordinates?.address
+                    },
+                    destination: {
+                        lat: routeDetails.destinationCoordinates?.latitude,
+                        lng: routeDetails.destinationCoordinates?.longitude,
+                        name: routeDetails.destinationCoordinates?.address
+                    }
+                });
+            }
+        } catch (e) {
+            console.error("Failed to load map route", e);
+        }
     };
 
     // Filter Logic
     const upcomingTrips = trips.filter(t => new Date(t.tripDate) > new Date() && t.status !== 'COMPLETED'); 
     const completedTrips = trips.filter(t => t.status === 'COMPLETED' || new Date(t.tripDate) <= new Date());
-
     const displayedTrips = activeTab === 'upcoming' ? upcomingTrips : completedTrips;
 
     return (
         <div className="min-h-screen bg-slate-950 pb-20">
             <Navbar />
             
-             {/* Content Wrapper */}
              <div className="pt-24 max-w-7xl mx-auto px-6 animate-fade-in">
                 
-                {/* Header */}
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4">
                     <div>
                         <button 
@@ -281,7 +317,6 @@ const DriverTripsPage = () => {
                         </button>
                         <h1 className="text-3xl font-bold text-white mb-2">Trip Management</h1>
                         
-                        {/* Tabs */}
                         <div className="flex gap-6 border-b border-slate-800 mt-4">
                             <button 
                                 className={`pb-2 px-1 text-sm font-bold transition-colors border-b-2 ${activeTab === 'upcoming' ? 'text-blue-400 border-blue-400' : 'text-slate-400 border-transparent hover:text-white'}`}
@@ -362,17 +397,37 @@ const DriverTripsPage = () => {
                                     </div>
                                     
                                     <div className="flex-1 flex justify-end gap-2 flex-wrap">
+                                        {/* View Route button for SCHEDULED trips */}
                                         {trip.status === 'SCHEDULED' && (
-                                            <button onClick={() => handleStartTrip(trip)} className="text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-lg transition-colors">
-                                                Start Trip
-                                            </button>
+                                            <>
+                                                <button 
+                                                    onClick={() => handleViewAvailableRoutes(trip)} 
+                                                    className="text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white px-3 py-2 rounded-lg transition-colors flex items-center gap-1"
+                                                >
+                                                    <Route className="w-3 h-3" /> View Routes
+                                                </button>
+                                                <button 
+                                                    onClick={() => handleStartTrip(trip)} 
+                                                    className="text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-lg transition-colors"
+                                                >
+                                                    Quick Start
+                                                </button>
+                                            </>
                                         )}
+                                        
+                                        {/* Live Tracking button for IN_PROGRESS trips */}
                                         {trip.status === 'IN_PROGRESS' && (
                                             <>
-                                                <button onClick={() => handleViewRoute(trip)} className="text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg transition-colors flex items-center gap-1">
-                                                    <MapPin className="w-3 h-3" /> Map
+                                                <button 
+                                                    onClick={() => handleViewLiveTracking(trip)} 
+                                                    className="text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg transition-colors flex items-center gap-1"
+                                                >
+                                                    <Gauge className="w-3 h-3" /> Live Track
                                                 </button>
-                                                <button onClick={() => handleEndTrip(trip)} className="text-xs font-bold bg-red-600 hover:bg-red-500 text-white px-3 py-2 rounded-lg transition-colors">
+                                                <button 
+                                                    onClick={() => handleEndTrip(trip)} 
+                                                    className="text-xs font-bold bg-red-600 hover:bg-red-500 text-white px-3 py-2 rounded-lg transition-colors"
+                                                >
                                                     End Trip
                                                 </button>
                                             </>
@@ -391,216 +446,264 @@ const DriverTripsPage = () => {
                     )}
                 </div>
 
-                {/* MODAL FOR MAP ROUTE */}
-                {isMapModalOpen && isLoaded && (
-                    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-fade-in">
-                         <div className="bg-slate-900 w-full max-w-5xl h-[80vh] rounded-2xl border border-slate-700 shadow-2xl overflow-hidden flex flex-col">
-                            <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950">
+                {/* MODAL: POST NEW TRIP */}
+                {isPostModalOpen && (
+                    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+                        <div className="bg-slate-900 w-full max-w-2xl max-h-[90vh] rounded-2xl border border-slate-700 shadow-2xl overflow-hidden animate-scale-in flex flex-col">
+                            <div className="flex justify-between items-center p-6 border-b border-slate-800 flex-shrink-0">
+                                <h2 className="text-2xl font-bold text-white">Post New Trip</h2>
+                                <button onClick={() => setIsPostModalOpen(false)} className="text-slate-400 hover:text-white"><X className="w-5 h-5"/></button>
+                            </div>
+                            
+                            <div className="overflow-y-auto flex-1 p-6">
+                            <div className="grid grid-cols-2 gap-4 mb-4">
                                 <div>
-                                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                                        <MapPin className="w-5 h-5 text-blue-500" /> Trip Route
-                                    </h2>
-                                    <p className="text-xs text-slate-400">
-                                        {mapTrip?.source} ➔ {mapTrip?.destination}
+                                    <label className="text-slate-400 text-sm font-medium">FROM</label>
+                                    <input 
+                                        type="text" 
+                                        name="source" 
+                                        value={tripForm.source} 
+                                        onChange={handleInputChange} 
+                                        className="w-full mt-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-blue-500 focus:outline-none" 
+                                        placeholder="Source" 
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-slate-400 text-sm font-medium">TO</label>
+                                    <input 
+                                        type="text" 
+                                        name="destination" 
+                                        value={tripForm.destination} 
+                                        onChange={handleInputChange} 
+                                        className="w-full mt-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-blue-500 focus:outline-none" 
+                                        placeholder="Destination" 
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-slate-400 text-sm font-medium">DATE</label>
+                                    <input 
+                                        type="date" 
+                                        name="date" 
+                                        value={tripForm.date} 
+                                        onChange={handleInputChange} 
+                                        className="w-full mt-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-blue-500 focus:outline-none" 
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-slate-400 text-sm font-medium">TIME</label>
+                                    <input 
+                                        type="time" 
+                                        name="time" 
+                                        value={tripForm.time} 
+                                        onChange={handleInputChange} 
+                                        className="w-full mt-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-blue-500 focus:outline-none" 
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-slate-400 text-sm font-medium">VEHICLE</label>
+                                    <select
+                                        name="vehicleId"
+                                        value={tripForm.vehicleId}
+                                        onChange={handleInputChange}
+                                        className="w-full mt-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
+                                        required
+                                    >
+                                        <option value="">-- Select --</option>
+                                        {vehicles.map(v => (
+                                            <option key={v.id} value={v.id}>
+                                                {v.vehicleNumber} - {v.model}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {vehicles.length === 0 && (
+                                        <p className="text-xs text-red-400 mt-1">
+                                            No vehicles found. Add a vehicle here first.
+                                        </p>
+                                    )}
+                                </div>
+                                <div>
+                                    <label className="text-slate-400 text-sm font-medium">EST. REACHING TIME</label>
+                                    <input 
+                                        type="text" 
+                                        name="estimatedDuration" 
+                                        value={tripForm.estimatedDuration} 
+                                        onChange={handleInputChange} 
+                                        className="w-full mt-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-blue-500 focus:outline-none" 
+                                        placeholder="e.g. 5 Hours or 8:30 PM" 
+                                    />
+                                </div>
+                                <div className="col-span-2">
+                                    <label className="text-slate-400 text-sm font-medium">PICKUP POINTS</label>
+                                    <input 
+                                        type="text" 
+                                        name="pickupPoints" 
+                                        value={tripForm.pickupPoints} 
+                                        onChange={handleInputChange} 
+                                        className="w-full mt-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-blue-500 focus:outline-none" 
+                                        placeholder="Comma separated" 
+                                    />
+                                </div>
+                                <div className="col-span-2">
+                                    <label className="text-slate-400 text-sm font-medium">DROP POINTS</label>
+                                    <input 
+                                        type="text" 
+                                        name="dropPoints" 
+                                        value={tripForm.dropPoints} 
+                                        onChange={handleInputChange} 
+                                        className="w-full mt-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-blue-500 focus:outline-none" 
+                                        placeholder="Comma separated" 
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-slate-400 text-sm font-medium">TOTAL DISTANCE (KM)</label>
+                                    <input 
+                                        type="number" 
+                                        name="totalKm" 
+                                        value={tripForm.totalKm} 
+                                        onChange={handleInputChange} 
+                                        className="w-full mt-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-blue-500 focus:outline-none" 
+                                        placeholder="e.g. 350" 
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-slate-400 text-sm font-medium">SEATS AVAILABLE</label>
+                                    <input 
+                                        type="number" 
+                                        name="availableSeats" 
+                                        value={tripForm.availableSeats} 
+                                        onChange={handleInputChange} 
+                                        className="w-full mt-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-blue-500 focus:outline-none" 
+                                        min="1" 
+                                        max={vehicles.find(v => v.id === Number(tripForm.vehicleId))?.seatCount || 5}
+                                        required
+                                    />
+                                    <p className="text-xs text-slate-500 mt-1">
+                                        Max Capacity: {vehicles.find(v => v.id === Number(tripForm.vehicleId))?.seatCount || 5}
                                     </p>
                                 </div>
-                                <button onClick={() => setIsMapModalOpen(false)} className="text-slate-400 hover:text-white p-2 hover:bg-slate-800 rounded-full transition-colors"><X className="w-5 h-5"/></button>
+                                <div className="col-span-2">
+                                    <label className="text-slate-400 text-sm font-medium">DESCRIPTION</label>
+                                    <textarea 
+                                        name="description" 
+                                        value={tripForm.description} 
+                                        onChange={handleInputChange} 
+                                        className="w-full mt-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-blue-500 focus:outline-none h-20 resize-none" 
+                                        placeholder="Any additional details about the trip..."
+                                    ></textarea>
+                                </div>
                             </div>
-                            <div className="flex-1 relative bg-slate-800">
-                                <GoogleMap
-                                    mapContainerStyle={mapContainerStyle}
-                                    center={defaultCenter}
-                                    zoom={12}
-                                    options={{
-                                        styles: [
-                                            { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
-                                            { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
-                                            { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
-                                            { featureType: "road", elementType: "geometry", stylers: [{ color: "#38414e" }] }
-                                        ]
-                                    }}
-                                >
-                                    {directionsResponse && (
-                                    <DirectionsRenderer directions={directionsResponse} />
-                                    )}
-                                </GoogleMap>
+                            
+                            <button onClick={handlePostTrip} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-lg font-bold transition-colors mt-4">Publish Trip</button>
                             </div>
-                         </div>
+                        </div>
                     </div>
                 )}
 
-                {/* MODAL FOR VIEW BOOKINGS */}
-                {selectedTrip && (
-                    <div className="fixed inset-0 z-[1000] flex items-start justify-center bg-black/80 backdrop-blur-sm p-4 pt-28 animate-fade-in">
-                        <div className="bg-slate-900 w-full max-w-5xl rounded-2xl border border-slate-700 shadow-2xl overflow-hidden animate-scale-in max-h-[85vh] flex flex-col">
-                            <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950">
-                                <div>
-                                    <h2 className="text-lg font-bold text-white">Trip Bookings</h2>
-                                    <p className="text-xs text-slate-400">{selectedTrip.source} to {selectedTrip.destination}</p>
+                {/* MODAL FOR ROUTE SELECTION */}
+                {isRouteModalOpen && routeTrip && (
+                    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+                        <div className="bg-slate-900 w-full max-w-2xl rounded-2xl border border-slate-700 shadow-2xl overflow-hidden animate-scale-in max-h-[90vh] flex flex-col">
+                            <div className="p-5 border-b border-slate-800 bg-slate-950">
+                                <div className="flex justify-between items-center">
+                                    <div>
+                                        <h2 className="text-lg font-bold text-white">Choose Your Route</h2>
+                                        <p className="text-xs text-slate-400">{routeTrip.source} ➔ {routeTrip.destination}</p>
+                                    </div>
+                                    <button onClick={() => setIsRouteModalOpen(false)} className="text-slate-400 hover:text-white"><X className="w-5 h-5"/></button>
                                 </div>
-                                <button onClick={() => setSelectedTrip(null)} className="text-slate-400 hover:text-white"><X className="w-5 h-5"/></button>
                             </div>
                             
-                            <div className="grid grid-cols-1 md:grid-cols-3 h-[60vh]">
-                                {/* LEFT: Booking List */}
-                                <div className="md:col-span-2 border-r border-slate-800 overflow-y-auto">
-                                    {loadingBookings ? (
-                                        <div className="p-10 text-center text-slate-500 flex flex-col items-center">
-                                            <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-2"></div>
-                                            Loading passengers...
-                                        </div>
-                                    ) : bookings.length === 0 ? (
-                                        <div className="p-10 text-center text-slate-500">
-                                            No bookings received yet.
-                                        </div>
-                                    ) : (
-                                        <div className="divide-y divide-slate-800">
-                                            {bookings.map(booking => (
-                                                <div key={booking.id} className="p-4 flex justify-between items-center hover:bg-slate-800/50 transition-colors">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-10 h-10 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold">
-                                                            {booking.customer?.username?.charAt(0) || 'U'}
-                                                        </div>
-                                                        <div>
-                                                            <h4 className="font-bold text-white text-sm">{booking.customer?.username || (booking.passengerName || 'Unknown User')}</h4>
-                                                            <div className="flex items-center gap-2 text-xs text-slate-500">
-                                                                <span>{booking.seatsBooked} Seat(s)</span>
-                                                                <span className="w-1 h-1 rounded-full bg-slate-600"></span>
-                                                                <span className="text-emerald-400">{booking.status}</span>
-                                                            </div>
-                                                            {booking.seatNumbers && <div className="text-xs text-blue-400 mt-1 font-mono">Seats: {booking.seatNumbers}</div>}
-                                                        </div>
-                                                    </div>
-                                                    <a href={`tel:${booking.customer?.mobileNumber || booking.phone || ''}`} className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-slate-400 hover:text-white hover:bg-blue-600 transition-all">
-                                                        <Phone className="w-4 h-4" />
-                                                    </a>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
+                            <div className="p-6 overflow-y-auto flex-1">
+                                <RouteSelector
+                                    routes={availableRoutes}
+                                    selectedIndex={availableRoutes.findIndex(r => r === selectedRoute)}
+                                    // Make sure route prop is passed if the component expects it for rendering list
+                                    // The RouteSelector I created takes 'routes' array.
+                                    onRouteSelect={(index) => handleSelectRoute(availableRoutes[index])}
+                                    isLoading={loadingRoutes}
+                                />
+                            </div>
 
-                                {/* RIGHT: Car Visual */}
-                                <div className="bg-slate-950 p-6 flex flex-col items-center justify-center">
-                                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-6">Seat Map</h3>
-                                    <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-inner">
-                                        <div className="text-center text-[10px] text-slate-600 uppercase font-bold tracking-widest mb-4 border-b border-slate-800 pb-2">Front</div>
-                                        <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-                                            <div className="w-12 h-12 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] text-slate-600">
-                                                Driver
-                                            </div>
-                                            {renderDriverSeatView(1)}
-                                            {renderDriverSeatView(2)}
-                                            {renderDriverSeatView(3)}
-                                            {renderDriverSeatView(4)}
-                                            {renderDriverSeatView(5)}
-                                        </div>
-                                        <div className="mt-8 flex gap-4 justify-center text-[10px] text-slate-500">
-                                            <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500/20 border border-emerald-500"></span> Booked</div>
-                                            <div className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-800 border-slate-700"></span> Empty</div>
-                                        </div>
-                                    </div>
+                            {selectedRoute && (
+                                <div className="p-5 border-t border-slate-800 bg-slate-950">
+                                    <button
+                                        onClick={handleStartTripWithRoute}
+                                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-lg font-bold transition-colors flex items-center justify-center gap-2"
+                                    >
+                                        <Gauge className="w-5 h-5" /> Start Trip with Selected Route
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* MODAL FOR LIVE TRACKING */}
+                {isTrackingModalOpen && trackingTrip && (
+                    <div className="fixed inset-0 z-[1000] flex items-start justify-center bg-black/80 backdrop-blur-sm p-4 pt-20 animate-fade-in overflow-y-auto">
+                        <div className="bg-slate-900 w-full max-w-6xl rounded-2xl border border-slate-700 shadow-2xl overflow-hidden animate-scale-in mb-20">
+                            <div className="p-5 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+                                <div>
+                                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                                        <Gauge className="w-5 h-5 text-emerald-500 animate-pulse" /> Live Tracking
+                                    </h2>
+                                    <p className="text-xs text-slate-400">
+                                        {trackingTrip.source} ➔ {trackingTrip.destination}
+                                    </p>
+                                </div>
+                                <button onClick={() => setIsTrackingModalOpen(false)} className="text-slate-400 hover:text-white p-2 hover:bg-slate-800 rounded-full transition-colors"><X className="w-5 h-5"/></button>
+                            </div>
+                            
+                            <div className="p-6">
+                                <VehicleTracker
+                                    vehicleId={trackingTrip.vehicle?.id}
+                                    tripId={trackingTrip.id}
+                                    vehicleName={`${trackingTrip.vehicle?.model || 'Vehicle'} - ${trackingTrip.vehicle?.licensePlate || ''}`}
+                                    // Route polyline is auto-fetched by VehicleTracker if tripId is present,
+                                    // but we can pass it if we have it locally to save a call.
+                                    // TrackingTrip might not have it loaded unless we selected it in this session.
+                                    showProgress={true}
+                                    height={500}
+                                    onComplete={() => {
+                                        alert('Trip completed!');
+                                        setIsTrackingModalOpen(false);
+                                        fetchTrips();
+                                    }}
+                                />
+
+                                <div className="mt-6 flex justify-end">
+                                    <button
+                                        onClick={() => handleEndTrip(trackingTrip)}
+                                        className="bg-red-600 hover:bg-red-500 text-white px-6 py-2 rounded-lg font-bold transition-colors"
+                                    >
+                                        End Trip
+                                    </button>
                                 </div>
                             </div>
                         </div>
                     </div>
                 )}
 
-                {isPostModalOpen && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in overflow-y-auto">
-                        <div className="bg-slate-900 w-full max-w-4xl rounded-2xl border border-slate-700 shadow-2xl overflow-hidden animate-slide-up max-h-[95vh] flex flex-col">
-                            <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900">
-                                <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                                    <MapPin className="w-5 h-5 text-blue-500" /> Post a New Trip
-                                </h2>
-                                <button onClick={() => setIsPostModalOpen(false)} className="text-slate-400 hover:text-white transition-colors bg-slate-800 w-8 h-8 rounded-full flex items-center justify-center">✕</button>
+                {/* OLD MAP MODAL REPLACED WITH LIVE MAP VIEW */}
+                {isMapModalOpen && mapTrip && (
+                    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+                        <div className="bg-slate-900 w-full max-w-5xl h-[80vh] rounded-2xl border border-slate-700 shadow-2xl overflow-hidden flex flex-col animate-scale-in">
+                            <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+                                <h3 className="text-white font-bold ml-2">Trip Route</h3>
+                                <button onClick={() => setIsMapModalOpen(false)} className="text-slate-400 hover:text-white p-2 hover:bg-slate-800 rounded-full"><X className="w-5 h-5"/></button>
                             </div>
-                            <form onSubmit={handlePostTrip} className="p-6 space-y-5">
-                                <div className="flex justify-end">
-                                    <button type="button" onClick={handleGetAIRoute} className="text-xs bg-purple-600 hover:bg-purple-500 text-white px-3 py-1 rounded font-bold transition-colors">
-                                        🤖 Suggest AI Route
-                                    </button>
-                                </div>
-                                {/* Row 1: Route & Date */}
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <div>
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">From</label>
-                                        <input type="text" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:border-blue-500 outline-none text-white" required placeholder="Source"
-                                            value={tripForm.source}
-                                            onChange={e => setTripForm({...tripForm, source: e.target.value})} />
-                                    </div>
-                                    <div>
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">To</label>
-                                        <input type="text" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:border-blue-500 outline-none text-white" required placeholder="Destination"
-                                            value={tripForm.destination}
-                                            onChange={e => setTripForm({...tripForm, destination: e.target.value})} />
-                                    </div>
-                                    <div>
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Date</label>
-                                        <input type="date" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:border-blue-500 outline-none text-white" required
-                                            onChange={e => setTripForm({...tripForm, date: e.target.value})} />
-                                    </div>
-                                </div>
-
-                                {/* Row 2: Time, Fare, Vehicle */}
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <div>
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Time</label>
-                                        <input type="time" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:border-blue-500 outline-none text-white" required
-                                            onChange={e => setTripForm({...tripForm, time: e.target.value})} />
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Vehicle</label>
-                                        <select className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:border-blue-500 outline-none text-white" required
-                                            onChange={e => setTripForm({...tripForm, vehicleId: e.target.value})}>
-                                            <option value="">-- Select --</option>
-                                            {vehicles.map(v => <option key={v.id} value={v.id}>{v.vehicleNumber} ({v.type})</option>)}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Est. Reaching Time</label>
-                                        <input type="text" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:border-blue-500 outline-none text-white" placeholder="e.g. 5 Hours or 8:30 PM"
-                                            value={tripForm.estimatedReachingTime || ''}
-                                            onChange={e => setTripForm({...tripForm, estimatedReachingTime: e.target.value})} />
-                                    </div>
-                                </div>
-
-                                {/* Row 3: Points & Distance */}
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <div className="md:col-span-2 grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Pickup Points</label>
-                                            <input type="text" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:border-blue-500 outline-none text-white" placeholder="Comma separated"
-                                                onChange={e => setTripForm({...tripForm, pickupPoints: e.target.value})} />
-                                        </div>
-                                        <div>
-                                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Drop Points</label>
-                                            <input type="text" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:border-blue-500 outline-none text-white" placeholder="Comma separated"
-                                                onChange={e => setTripForm({...tripForm, dropPoints: e.target.value})} />
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Total Distance (km)</label>
-                                        <input type="number" step="0.1" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:border-blue-500 outline-none text-white" required placeholder="e.g. 350"
-                                            value={tripForm.totalKm || ''}
-                                            onChange={e => setTripForm({...tripForm, totalKm: parseFloat(e.target.value)})} />
-                                    </div>
-                                </div>
-
-                                {/* Row 4: Estimated Duration */}
-                                <div>
-                                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Estimated Duration (minutes)</label>
-                                    <input type="number" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:border-blue-500 outline-none text-white" placeholder="e.g. 120 for 2 hours"
-                                        value={tripForm.estimatedDuration || ''}
-                                        onChange={e => setTripForm({...tripForm, estimatedDuration: e.target.value})} />
-                                    <p className="text-xs text-slate-500 mt-1">Optional: Auto-filled by AI route or enter manually</p>
-                                </div>
-
-                                <div className="pt-2">
-                                    <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-blue-900/40 text-sm transition-transform active:scale-[0.98]">Publish Trip</button>
-                                </div>
-                            </form>
+                            <div className="flex-1 w-full relative">
+                                <LiveMap 
+                                    className="h-full w-full"
+                                    route={mapRouteData}
+                                    // Pass simpler vehicle object if we just want to create a marker at source or start
+                                    vehicles={[]} 
+                                />
+                            </div>
                         </div>
                     </div>
                 )}
@@ -608,6 +711,5 @@ const DriverTripsPage = () => {
         </div>
     );
 };
-
 
 export default DriverTripsPage;

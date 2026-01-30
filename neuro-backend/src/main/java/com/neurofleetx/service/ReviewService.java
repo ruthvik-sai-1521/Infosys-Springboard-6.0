@@ -41,11 +41,12 @@ public class ReviewService {
     }
 
     public List<Review> getAllReviews() {
-        return reviewRepository.findAll();
+        return reviewRepository.findAll(
+                org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "id"));
     }
 
     public List<Review> getDriverReviews(Long driverId) {
-        return reviewRepository.findByDriverId(driverId);
+        return reviewRepository.findByDriverIdOrderByIdDesc(driverId);
     }
 
     public Double getDriverRating(Long driverId) {

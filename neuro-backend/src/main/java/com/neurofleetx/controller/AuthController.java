@@ -30,7 +30,7 @@ public class AuthController {
                 "ADMIN".equals(loginRequest.getRole())) {
 
             String token = jwtService.generateToken(loginRequest.getEmail(), "ADMIN");
-            return ResponseEntity.ok(Map.of("token", token, "username", "System Admin", "role", "ADMIN"));
+            return ResponseEntity.ok(Map.of("token", token, "username", "System Admin", "role", "ADMIN", "id", 1L));
         }
 
         // 2. Database check for other roles
@@ -51,7 +51,8 @@ public class AuthController {
 
                     String token = jwtService.generateToken(user.getEmail(), user.getRole());
                     return ResponseEntity
-                            .ok(Map.of("token", token, "username", user.getUsername(), "role", user.getRole()));
+                            .ok(Map.of("token", token, "username", user.getUsername(), "role", user.getRole(), "id",
+                                    user.getId()));
                 })
                 .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND)
                         .body(Map.of("message", "Account not found for this email.")));

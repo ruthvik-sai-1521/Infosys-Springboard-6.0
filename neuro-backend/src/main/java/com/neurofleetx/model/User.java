@@ -2,6 +2,7 @@ package com.neurofleetx.model;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import java.time.LocalDateTime;
 
 @Entity
 @Data
@@ -56,4 +57,20 @@ public class User {
 
     @Column(name = "completed_trips_count")
     private Integer completedTripsCount = 0;
+
+    // Driver Location & Status
+    @Column(name = "current_latitude")
+    private Double currentLatitude;
+
+    @Column(name = "current_longitude")
+    private Double currentLongitude;
+
+    @Column(name = "is_online")
+    private Boolean isOnline = false;
+
+    @Column(name = "last_online_at")
+    private LocalDateTime lastOnlineAt;
+
+    @Column(name = "current_trip_id")
+    private Long currentTripId;
 }

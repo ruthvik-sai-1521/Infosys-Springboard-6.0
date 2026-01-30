@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import Navbar from '../../components/Navbar';
 import axios from 'axios';
+import { Phone, MessageSquare, X, MapPin, Clock, AlertCircle, Gauge } from 'lucide-react';
+import { VehicleTracker } from '../../components/maps';
 
 const CustomerDashboard = () => {
     const { user } = useAuth();
-    const customerId = user?.id || 2; // Stub logic
+    const customerId = user?.id || 2;
     const [activeTab, setActiveTab] = useState('search');
     
     const [pickup, setPickup] = useState('');
@@ -13,6 +15,13 @@ const CustomerDashboard = () => {
     const [results, setResults] = useState([]);
     const [searched, setSearched] = useState(false);
     const [bookings, setBookings] = useState([]);
+
+    // NEW: Tracking State
+    const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
+    const [trackingBooking, setTrackingBooking] = useState(null);
+    const [trackingData, setTrackingData] = useState(null);
+    const [trackingError, setTrackingError] = useState(null);
+    const [loadingTracking, setLoadingTracking] = useState(false);
 
     useEffect(() => {
         if (!customerId) return;
@@ -39,7 +48,6 @@ const CustomerDashboard = () => {
     const fetchOccupiedSeats = async (tripId) => {
         try {
             const res = await axios.get(`/api/bookings/trip/${tripId}`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
-            // Aggregate all seatNumbers from bookings
             const taken = res.data.reduce((acc, booking) => {
                 if (booking.seatNumbers) {
                     return [...acc, ...booking.seatNumbers.split(',')];
@@ -55,7 +63,7 @@ const CustomerDashboard = () => {
     const openSeatSelection = (trip) => {
         setSelectedTrip(trip);
         setSelectedSeats([]);
-        setOccupiedSeats([]); // Reset
+        setOccupiedSeats([]);
         fetchOccupiedSeats(trip.id);
     };
 
@@ -66,7 +74,6 @@ const CustomerDashboard = () => {
         if (selectedSeats.includes(s)) {
             setSelectedSeats(selectedSeats.filter(item => item !== s));
         } else {
-            // Limit max seats? e.g. 4
             if (selectedSeats.length >= 4) return alert("You can only book up to 4 seats.");
             setSelectedSeats([...selectedSeats, s]);
         }
@@ -79,14 +86,13 @@ const CustomerDashboard = () => {
             await axios.post('/api/bookings/book', {
                 tripId: selectedTrip.id,
                 customerId: customerId,
-                seatNumbers: selectedSeats // Send array
+                seatNumbers: selectedSeats
             }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
             
             alert("Booking Confirmed! Seats: " + selectedSeats.join(', '));
             setSearched(false); 
             setSelectedTrip(null);
             
-            // Refresh bookings
             const res = await axios.get(`/api/bookings/customer/${customerId}`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
             setBookings(res.data);
             setActiveTab('bookings');
@@ -123,6 +129,91 @@ const CustomerDashboard = () => {
         }
     };
 
+    // NEW: Handle tracking
+    const handleTrackVehicle = async (booking) => {
+        setTrackingBooking(booking);
+        setIsTrackingModalOpen(true);
+        setLoadingTracking(true);
+        setTrackingData(null);
+        setTrackingError(null);
+
+        try {
+            const res = await axios.get(`/api/bookings/${booking.id}/track?customerId=${customerId}`);
+            const data = res.data;
+
+            if (!data.trackingAvailable) {
+                setTrackingError({
+                    reason: data.reason,
+                    message: data.message,
+                    availableFrom: data.availableFrom,
+                    endedAt: data.endedAt
+                });
+            } else {
+                setTrackingData(data);
+            }
+        } catch (err) {
+            setTrackingError({
+                reason: 'error',
+                message: err.response?.data?.error || 'Failed to load tracking information'
+            });
+        }
+        setLoadingTracking(false);
+    };
+
+    const formatDateTime = (dateTime) => {
+        if (!dateTime) return 'N/A';
+        return new Date(dateTime).toLocaleString([], {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    };
+
+    // Helper to decode polyline
+    const decodePolyline = (encoded) => {
+        if (!encoded) return [];
+        const poly = [];
+        let index = 0, len = encoded.length;
+        let lat = 0, lng = 0;
+
+        while (index < len) {
+            let b, shift = 0, result = 0;
+            do {
+                b = encoded.charCodeAt(index++) - 63;
+                result |= (b & 0x1f) << shift;
+                shift += 5;
+            } while (b >= 0x20);
+            const dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
+            lat += dlat;
+
+            shift = 0;
+            result = 0;
+            do {
+                b = encoded.charCodeAt(index++) - 63;
+                result |= (b & 0x1f) << shift;
+                shift += 5;
+            } while (b >= 0x20);
+            const dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
+            lng += dlng;
+
+            const p = [lat * 1e-5, lng * 1e-5];
+            poly.push(p);
+        }
+        return poly;
+    };
+
+    // Helper to check if tracking should be shown (for button display)
+    const canTrack = (booking) => {
+        if (!booking.trip) return false;
+        const tripDate = new Date(booking.trip.tripDate);
+        const now = new Date();
+        const oneHourBefore = new Date(tripDate.getTime() - 60 * 60 * 1000);
+        
+        // Show button if within reasonable range or trip is in progress
+        return booking.status === 'CONFIRMED' || booking.trip.status === 'IN_PROGRESS';
+    };
+
     const renderSeat = (num) => {
         const s = String(num);
         const isOccupied = occupiedSeats.includes(s);
@@ -148,7 +239,7 @@ const CustomerDashboard = () => {
         <div className="min-h-screen bg-slate-950 text-white">
             <Navbar />
             
-            <div className="max-w-4xl mx-auto pt-24 px-6">
+            <div className="max-w-4xl mx-auto pt-24 px-6 pb-20">
                 {/* Tabs */}
                 <div className="flex space-x-4 mb-8 justify-center">
                     <button onClick={() => setActiveTab('search')} className={`px-6 py-2 rounded-full ${activeTab === 'search' ? 'bg-blue-600' : 'bg-slate-800'}`}>Search Rides</button>
@@ -250,16 +341,14 @@ const CustomerDashboard = () => {
                                             <span>Date: {new Date(b.bookingTime).toLocaleDateString()}</span>
                                             {b.seatNumbers && <span className="text-blue-400 font-bold">Seats: {b.seatNumbers}</span>}
                                         </div>
-                                        {/* Live Tracking Button - Logic: -1hr to +1hr of trip time OR status IN_PROGRESS */}
-                                        {(b.status === 'CONFIRMED' || b.trip?.status === 'IN_PROGRESS') && (
+                                        
+                                        {/* NEW: Track Vehicle Button with time-based display */}
+                                        {canTrack(b) && (
                                             <button 
-                                                onClick={() => {
-                                                    alert("Live tracking feature is simulated. Driver location: Bangalore."); 
-                                                    // In a real app, open a modal with GoogleMap centered on b.trip.vehicle.currentLocation
-                                                }}
-                                                className="mt-3 text-xs bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 w-fit"
+                                                onClick={() => handleTrackVehicle(b)}
+                                                className="mt-3 text-xs bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 w-fit transition-colors"
                                             >
-                                                📍 Track Ride
+                                                <MapPin className="w-3 h-3" /> Track Vehicle
                                             </button>
                                         )}
                                     </div>
@@ -324,6 +413,145 @@ const CustomerDashboard = () => {
                     </div>
                 </div>
             )}
+
+            {/* NEW: TRACKING MODAL */}
+            {isTrackingModalOpen && trackingBooking && (
+                <div className="fixed inset-0 z-[1100] flex items-start justify-center bg-black/80 backdrop-blur-sm p-4 pt-20 animate-fade-in overflow-y-auto">
+                    <div className="bg-slate-900 w-full max-w-6xl rounded-2xl border border-slate-700 shadow-2xl overflow-hidden animate-scale-in mb-20">
+                        {/* Header */}
+                        <div className="p-5 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+                            <div>
+                                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                                    <Gauge className="w-5 h-5 text-purple-500" /> Vehicle Tracking
+                                </h2>
+                                <p className="text-xs text-slate-400">
+                                    Booking #{trackingBooking.id} • {trackingBooking.pickupLoc} ➔ {trackingBooking.dropoffLoc}
+                                </p>
+                            </div>
+                            <button 
+                                onClick={() => setIsTrackingModalOpen(false)} 
+                                className="text-slate-400 hover:text-white p-2 hover:bg-slate-800 rounded-full transition-colors"
+                            >
+                                <X className="w-5 h-5"/>
+                            </button>
+                        </div>
+
+                        {/* Content */}
+                        <div className="p-6">
+                            {loadingTracking ? (
+                                <div className="flex flex-col items-center justify-center py-20">
+                                    <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                                    <p className="text-slate-400">Loading tracking information...</p>
+                                </div>
+                            ) : trackingError ? (
+                                <div className="flex flex-col items-center justify-center py-20">
+                                    <AlertCircle className="w-16 h-16 text-amber-500 mb-4" />
+                                    <h3 className="text-xl font-bold text-white mb-2">Tracking Unavailable</h3>
+                                    <p className="text-slate-400 text-center max-w-md">
+                                        {trackingError.message}
+                                    </p>
+                                    {trackingError.availableFrom && (
+                                        <div className="mt-4 bg-slate-800 p-4 rounded-lg border border-slate-700">
+                                            <div className="flex items-center gap-2 text-sm text-slate-300">
+                                                <Clock className="w-4 h-4 text-blue-400" />
+                                                <span>Available from: <strong>{formatDateTime(trackingError.availableFrom)}</strong></span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : trackingData ? (
+                                <>
+                                    {/* Driver Info Card */}
+                                    <div className="bg-slate-800/50 p-5 rounded-xl border border-slate-700 mb-6">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-4">
+                                                {/* Driver Avatar */}
+                                                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold text-2xl">
+                                                    {trackingData.driver?.name?.charAt(0) || 'D'}
+                                                </div>
+                                                <div>
+                                                    <h3 className="text-lg font-bold text-white">{trackingData.driver?.name || 'Driver'}</h3>
+                                                    <p className="text-sm text-slate-400">
+                                                        {trackingData.vehicle?.model || 'Vehicle'} • {trackingData.vehicle?.licensePlate || 'N/A'}
+                                                    </p>
+                                                    <p className="text-xs text-slate-500 mt-1">
+                                                        Trip Status: <span className={`font-bold ${trackingData.trip?.status === 'IN_PROGRESS' ? 'text-emerald-400' : 'text-blue-400'}`}>
+                                                            {trackingData.trip?.status}
+                                                        </span>
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            
+                                            {/* Action Buttons */}
+                                            <div className="flex gap-3">
+                                                <a
+                                                    href={`tel:${trackingData.driver?.phone || ''}`}
+                                                    className="w-12 h-12 rounded-full bg-emerald-600 hover:bg-emerald-500 flex items-center justify-center text-white transition-colors"
+                                                    title="Call Driver"
+                                                >
+                                                    <Phone className="w-5 h-5" />
+                                                </a>
+                                                <button
+                                                    onClick={() => alert('Chat feature coming soon!')}
+                                                    className="w-12 h-12 rounded-full bg-blue-600 hover:bg-blue-500 flex items-center justify-center text-white transition-colors"
+                                                    title="Message Driver"
+                                                >
+                                                    <MessageSquare className="w-5 h-5" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Live Map with VehicleTracker */}
+                                    <VehicleTracker
+                                        vehicleId={trackingData.vehicle?.id}
+                                        tripId={trackingData.trip?.id}
+                                        vehicleName={`${trackingData.vehicle?.model || 'Vehicle'} - ${trackingData.vehicle?.licensePlate || ''}`}
+                                        routePolyline={trackingData.trip?.selectedRoutePolyline ? decodePolyline(trackingData.trip.selectedRoutePolyline) : []}
+                                        source={{
+                                            lat: trackingData.trip?.sourceLatitude,
+                                            lng: trackingData.trip?.sourceLongitude,
+                                            name: trackingData.trip?.source
+                                        }}
+                                        destination={{
+                                            lat: trackingData.trip?.destinationLatitude,
+                                            lng: trackingData.trip?.destinationLongitude,
+                                            name: trackingData.trip?.destination
+                                        }}
+                                        height={500}
+                                        showProgress={true}
+                                        onComplete={() => {
+                                            alert('Trip completed!');
+                                            setIsTrackingModalOpen(false);
+                                        }}
+                                    />
+
+                                    {/* Trip Info */}
+                                    <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+                                        <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
+                                            <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Seats</p>
+                                            <p className="text-lg font-bold text-white">{trackingData.booking?.seats || 'N/A'}</p>
+                                        </div>
+                                        <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
+                                            <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Pickup</p>
+                                            <p className="text-sm font-semibold text-white truncate">{trackingData.booking?.pickupLocation || trackingData.trip?.source}</p>
+                                        </div>
+                                        <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
+                                            <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Dropoff</p>
+                                            <p className="text-sm font-semibold text-white truncate">{trackingData.booking?.dropoffLocation || trackingData.trip?.destination}</p>
+                                        </div>
+                                        <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
+                                            <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Trip Date</p>
+                                            <p className="text-sm font-semibold text-white">{formatDateTime(trackingData.trip?.tripDate)}</p>
+                                        </div>
+                                    </div>
+                                </>
+                            ) : null}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* REVIEW MODAL */}
             {reviewModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
@@ -347,7 +575,7 @@ const CustomerDashboard = () => {
 
                         <textarea 
                             className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-slate-300 focus:border-blue-500 outline-none mb-6 h-32 resize-none"
-                            placeholder="Share your feedback provided to the driver..."
+                            placeholder="Share your feedback about the driver..."
                             value={feedback}
                             onChange={(e) => setFeedback(e.target.value)}
                         />

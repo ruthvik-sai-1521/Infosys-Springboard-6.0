@@ -29,17 +29,24 @@ public class TripService {
         Trip trip = new Trip();
         trip.setDriver(userRepository.findById(tripRequest.getDriverId())
                 .orElseThrow(() -> new RuntimeException("Driver not found")));
-        trip.setVehicle(vehicleRepository.findById(tripRequest.getVehicleId())
-                .orElseThrow(() -> new RuntimeException("Vehicle not found")));
+
+        Vehicle vehicle = vehicleRepository.findById(tripRequest.getVehicleId())
+                .orElseThrow(() -> new RuntimeException("Vehicle not found"));
+        trip.setVehicle(vehicle);
+
         trip.setSource(tripRequest.getSource());
         trip.setDestination(tripRequest.getDestination());
         trip.setTripDate(tripRequest.getTripDate());
-        trip.setFare(tripRequest.getFare());
         trip.setAvailableSeats(tripRequest.getAvailableSeats());
         trip.setPickupPoints(tripRequest.getPickupPoints());
         trip.setDropPoints(tripRequest.getDropPoints());
         trip.setTotalKm(tripRequest.getTotalKm());
+        trip.setEstimatedReachingTime(tripRequest.getEstimatedReachingTime());
         trip.setStatus("SCHEDULED");
+
+        // Calculate fare automatically based on vehicle type and distance
+        Double calculatedFare = calculateFare(vehicle.getType(), tripRequest.getTotalKm());
+        trip.setFare(calculatedFare);
 
         // Set estimated duration and calculate auto-end time if provided
         if (tripRequest.getEstimatedDuration() != null && tripRequest.getTripDate() != null) {
@@ -50,27 +57,60 @@ public class TripService {
         // Add to driver's pending earnings
         User driver = trip.getDriver();
         Double currentPending = driver.getPendingEarnings();
-        Double tripFare = trip.getFare();
         driver.setPendingEarnings(
-                (currentPending != null ? currentPending : 0.0) + (tripFare != null ? tripFare : 0.0));
+                (currentPending != null ? currentPending : 0.0) + calculatedFare);
         userRepository.save(driver);
 
         return tripRepository.save(trip);
     }
 
+    /**
+     * Calculate fare based on vehicle type and distance
+     * SUV: ₹2.5 per km
+     * Sedan/Hatchback: ₹2 per km
+     * EV: ₹1.7 per km
+     */
+    private Double calculateFare(String vehicleType, Double distanceKm) {
+        if (distanceKm == null || distanceKm <= 0) {
+            return 0.0;
+        }
+
+        double ratePerKm;
+        String type = vehicleType != null ? vehicleType.toUpperCase() : "";
+
+        switch (type) {
+            case "SUV":
+                ratePerKm = 2.5;
+                break;
+            case "EV":
+                ratePerKm = 1.7;
+                break;
+            case "SEDAN":
+            case "HATCHBACK":
+                ratePerKm = 2.0;
+                break;
+            default:
+                // Default to sedan rate if type not recognized
+                ratePerKm = 2.0;
+        }
+
+        return Math.round(distanceKm * ratePerKm * 100.0) / 100.0; // Round to 2 decimal places
+    }
+
     public List<Trip> searchTrips(String source, String destination) {
         // Find scheduled trips from now onwards
         return tripRepository
-                .findBySourceContainingIgnoreCaseAndDestinationContainingIgnoreCaseAndTripDateAfterAndStatus(
+                .findBySourceContainingIgnoreCaseAndDestinationContainingIgnoreCaseAndTripDateAfterAndStatusOrderByTripDateDesc(
                         source, destination, LocalDateTime.now(), "SCHEDULED");
     }
 
     public List<Trip> getDriverTrips(Long driverId) {
-        return tripRepository.findByDriverId(driverId);
+        return tripRepository.findByDriverIdOrderByTripDateDesc(driverId);
     }
 
     public List<Trip> getAllTrips() {
-        return tripRepository.findAll();
+        return tripRepository.findAll(
+                org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "id"));
     }
 
     public Trip getTripById(Long id) {
