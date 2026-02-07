@@ -55,6 +55,12 @@ public class SecurityConfig implements org.springframework.web.servlet.config.an
                         .requestMatchers("/api/trips/**").authenticated() // or hasAnyAuthority("ROLE_DRIVER",
                                                                           // "ROLE_CUSTOMER", "ROLE_ADMIN")
                         .requestMatchers("/api/bookings/**").authenticated()
+                        .requestMatchers("/api/health/fleet/**").hasAnyAuthority("ROLE_MANAGER", "ROLE_ADMIN")
+                        .requestMatchers("/api/health/driver/**")
+                        .hasAnyAuthority("ROLE_DRIVER", "ROLE_MANAGER", "ROLE_ADMIN")
+                        .requestMatchers("/api/health/alerts/**")
+                        .hasAnyAuthority("ROLE_DRIVER", "ROLE_MANAGER", "ROLE_ADMIN")
+                        .requestMatchers("/api/health/vehicle/**").authenticated()
                         .anyRequest().authenticated())
 
                 .sessionManagement(sess -> sess.sessionCreationPolicy(

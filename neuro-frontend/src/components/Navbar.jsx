@@ -3,6 +3,8 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
 import { User, LogOut, ChevronDown } from 'lucide-react';
 
+import DriverAlertsNotification from './DriverAlertsNotification';
+
 const Navbar = () => {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
@@ -28,7 +30,11 @@ const Navbar = () => {
             {/* User Profile & Logout */}
             <div className="flex items-center gap-6">
                 {user ? (
-                    <div className="relative">
+                    <div className="flex items-center gap-4">
+                        {/* Driver Alerts */}
+                        {user.role === 'DRIVER' && <DriverAlertsNotification driverId={user.id} />}
+
+                        <div className="relative">
                         <button 
                             onClick={() => setIsProfileOpen(!isProfileOpen)}
                             className="flex items-center gap-3 bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-700/50 text-slate-300 hover:text-white transition-colors focus:outline-none"
@@ -54,6 +60,7 @@ const Navbar = () => {
                                 </button>
                             </div>
                         )}
+                    </div>
                     </div>
                 ) : (
                     <div className="space-x-4">

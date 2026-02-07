@@ -28,6 +28,9 @@ public class SimulationController {
     @Autowired
     private TripRepository tripRepository;
 
+    @Autowired
+    private com.neurofleetx.repository.VehicleRepository vehicleRepository;
+
     /**
      * POST /api/simulation/start
      * Start vehicle movement simulation
@@ -271,6 +274,54 @@ public class SimulationController {
             return ResponseEntity.badRequest().body(Map.of(
                     "success", false,
                     "error", "Failed to start simulation from trip: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * POST /api/simulation/start-test-drive/{vehicleId}
+     * Start a test drive simulation without a trip
+     */
+    @PostMapping("/start-test-drive/{vehicleId}")
+    public ResponseEntity<?> startTestDrive(@PathVariable Long vehicleId) {
+        try {
+            // Fetch vehicle to get current location
+            Optional<com.neurofleetx.model.Vehicle> vehicleOpt = vehicleRepository.findById(vehicleId);
+            if (vehicleOpt.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("success", false, "error", "Vehicle not found"));
+            }
+            com.neurofleetx.model.Vehicle vehicle = vehicleOpt.get();
+
+            // Generate a simple route around current location (or default Bangalore if
+            // null)
+            double startLat = 12.9716;
+            double startLng = 77.5946;
+            if (vehicle.getLastKnownLatitude() != null)
+                startLat = vehicle.getLastKnownLatitude();
+            if (vehicle.getLastKnownLongitude() != null)
+                startLng = vehicle.getLastKnownLongitude();
+
+            // Create a small box route (approx 1-2km)
+            List<LatLng> route = List.of(
+                    new LatLng(startLat, startLng),
+                    new LatLng(startLat + 0.01, startLng), // ~1.1km North
+                    new LatLng(startLat + 0.01, startLng + 0.01), // ~1.1km East
+                    new LatLng(startLat, startLng + 0.01), // ~1.1km South
+                    new LatLng(startLat, startLng) // Back to start
+            );
+
+            SimulationStatus status = simulationService.startSimulation(
+                    vehicleId,
+                    vehicle.getDriver() != null ? vehicle.getDriver().getId() : 0L,
+                    null, // No Trip ID
+                    route,
+                    300, // 5 minutes
+                    4000.0 // 4 km
+            );
+
+            return ResponseEntity.ok(Map.of("success", true, "message", "Test drive started", "status", status));
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.badRequest().body(Map.of("success", false, "error", "Failed: " + e.getMessage()));
         }
     }
 }

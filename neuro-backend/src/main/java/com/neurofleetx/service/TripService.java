@@ -25,6 +25,12 @@ public class TripService {
     @Autowired
     private VehicleRepository vehicleRepository;
 
+    @Autowired
+    private VehicleHealthSimulationService healthSimulationService;
+
+    @Autowired
+    private VehicleHealthService healthService;
+
     public Trip createTrip(TripRequest tripRequest) {
         Trip trip = new Trip();
         trip.setDriver(userRepository.findById(tripRequest.getDriverId())
@@ -153,6 +159,9 @@ public class TripService {
         // Update driver statistics
         updateDriverStats(trip);
 
+        // Update vehicle health based on trip distance
+        updateVehicleHealthAfterTrip(trip);
+
         return tripRepository.save(trip);
     }
 
@@ -170,6 +179,9 @@ public class TripService {
 
             // Update driver statistics
             updateDriverStats(trip);
+
+            // Update vehicle health based on trip distance
+            updateVehicleHealthAfterTrip(trip);
 
             tripRepository.save(trip);
             System.out.println("Auto-ended trip #" + trip.getId() + " for driver " + trip.getDriver().getUsername());
@@ -200,5 +212,42 @@ public class TripService {
                 (currentEarnings != null ? currentEarnings : 0.0) + tripFare);
 
         userRepository.save(driver);
+    }
+
+    /**
+     * Update vehicle health after trip completion
+     * - Updates kilometers driven
+     * - Applies realistic wear based on distance
+     * - Recalculates health status
+     */
+    private void updateVehicleHealthAfterTrip(Trip trip) {
+        Vehicle vehicle = trip.getVehicle();
+        if (vehicle == null)
+            return;
+
+        // Determine distance driven (prefer selectedRouteDistance, fallback to totalKm)
+        Double distanceKm = trip.getSelectedRouteDistance() != null ? trip.getSelectedRouteDistance()
+                : trip.getTotalKm();
+
+        if (distanceKm == null || distanceKm <= 0)
+            return;
+
+        int tripKms = (int) Math.round(distanceKm);
+
+        // Update kilometers driven
+        int currentKms = vehicle.getKmsDriven() != null ? vehicle.getKmsDriven() : 0;
+        vehicle.setKmsDriven(currentKms + tripKms);
+
+        // Update kilometers since last service
+        int kmsSinceService = vehicle.getKmsSinceLastService() != null ? vehicle.getKmsSinceLastService() : 0;
+        vehicle.setKmsSinceLastService(kmsSinceService + tripKms);
+
+        // Apply realistic wear based on distance
+        healthSimulationService.applyTripWear(vehicle, tripKms);
+
+        // Recalculate overall health status
+        healthService.updateHealthStatus(vehicle);
+
+        vehicleRepository.save(vehicle);
     }
 }

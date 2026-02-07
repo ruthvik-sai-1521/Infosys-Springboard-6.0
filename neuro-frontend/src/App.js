@@ -14,6 +14,7 @@ import AdminLayout from './layouts/AdminLayout';
 import AdminDriverPage from './pages/admin/AdminDriverPage';
 import AdminTripPage from './pages/admin/AdminTripPage';
 import AdminCustomerPage from './pages/admin/AdminCustomerPage';
+import VehicleHealthPage from './pages/VehicleHealthPage';
 
 // --- AXIOS GLOBAL CONFIGURATION ---
 axios.defaults.baseURL = 'http://localhost:8080';
@@ -82,6 +83,11 @@ function App() {
                     <ManagerDashboard />
                 </PrivateRoute>
             } />
+             <Route path="/manager/:section" element={
+                <PrivateRoute allowedRoles={['MANAGER']}>
+                    <ManagerDashboard />
+                </PrivateRoute>
+            } />
             <Route path="/driver" element={
                 <PrivateRoute allowedRoles={['DRIVER']}>
                     <DriverDashboard />
@@ -106,6 +112,11 @@ function App() {
                     <div className="min-h-screen bg-slate-950 pt-20">
                          <DriverProfilePage />
                     </div>
+                </PrivateRoute>
+            } />
+            <Route path="/vehicle/:id/health" element={
+                <PrivateRoute allowedRoles={['DRIVER', 'MANAGER', 'ADMIN']}>
+                    <VehicleHealthPage />
                 </PrivateRoute>
             } />
           </Routes>

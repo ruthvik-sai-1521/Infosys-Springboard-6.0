@@ -83,6 +83,63 @@ public class Vehicle {
     @Column(name = "last_location_update")
     private LocalDateTime lastLocationUpdate;
 
+    // --- Health Monitoring Fields ---
+
+    @Column(name = "engine_health")
+    private Integer engineHealth = 100;
+
+    @Column(name = "transmission_health")
+    private Integer transmissionHealth = 100;
+
+    @Column(name = "brake_pad_health")
+    private Integer brakePadHealth = 100;
+
+    @Column(name = "tire_health")
+    private Integer tireHealth = 100;
+
+    @Column(name = "tire_pressure_fl")
+    private Double tirePressureFL = 32.0;
+
+    @Column(name = "tire_pressure_fr")
+    private Double tirePressureFR = 32.0;
+
+    @Column(name = "tire_pressure_rl")
+    private Double tirePressureRL = 32.0;
+
+    @Column(name = "tire_pressure_rr")
+    private Double tirePressureRR = 32.0;
+
+    @Column(name = "battery_health")
+    private Integer batteryHealth = 100;
+
+    @Column(name = "battery_voltage")
+    private Double batteryVoltage = 12.6;
+
+    @Column(name = "oil_level")
+    private Integer oilLevel = 100;
+
+    @Column(name = "coolant_level")
+    private Integer coolantLevel = 100;
+
+    @Column(name = "kms_since_last_service")
+    private Integer kmsSinceLastService = 0;
+
+    @Column(name = "last_service_date")
+    private LocalDateTime lastServiceDate;
+
+    @Column(name = "last_health_check")
+    private LocalDateTime lastHealthCheck;
+
+    @Column(name = "health_status")
+    @Enumerated(EnumType.STRING)
+    private HealthStatus healthStatus = HealthStatus.HEALTHY;
+
+    @Column(name = "health_score")
+    private Integer healthScore = 100;
+
+    @Column(name = "fuel_efficiency")
+    private Double fuelEfficiency; // km/l or equivalent
+
     /**
      * Automatically set seat count based on vehicle type before persisting
      */

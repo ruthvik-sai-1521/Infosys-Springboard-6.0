@@ -1,15 +1,33 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import Navbar from '../../components/Navbar';
 import axios from 'axios';
-import { MapPin, Battery, Droplet, Gauge, PenTool, ArrowLeft, PlusCircle } from 'lucide-react';
+import { MapPin, Battery, Droplet, Gauge, PenTool, ArrowLeft, PlusCircle, Activity, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { LiveMap } from '../../components/maps';
+import { Client } from '@stomp/stompjs';
+import SockJS from 'sockjs-client';
+import DriverVehicleHealthModal from './DriverVehicleHealthModal';
 
 const defaultCenter = {
     lat: 12.9716,
     lng: 77.5946
 };
+
+// Simple Toast Component for Alerts
+const AlertToast = ({ alert, onClose }) => (
+    <div className="bg-slate-900 border border-slate-700 p-4 rounded-xl shadow-2xl animate-fade-in flex gap-3 max-w-sm relative">
+        <div className={`p-2 rounded-lg h-fit ${alert.severity === 'CRITICAL' ? 'bg-red-500/20 text-red-500' : 'bg-amber-500/20 text-amber-500'}`}>
+            <Activity className="w-5 h-5" />
+        </div>
+        <div>
+            <h4 className="font-bold text-white text-sm">{alert.title}</h4>
+            <p className="text-slate-400 text-xs mt-1">{alert.description}</p>
+            <p className="text-slate-500 text-[10px] mt-2">{new Date().toLocaleTimeString()}</p>
+        </div>
+        <button onClick={onClose} className="text-slate-500 hover:text-white h-fit absolute top-2 right-2"><X className="w-4 h-4" /></button>
+    </div>
+);
 
 const DriverVehiclesPage = () => {
     const { user } = useAuth();
@@ -17,6 +35,14 @@ const DriverVehiclesPage = () => {
     const [vehicles, setVehicles] = useState([]);
     const [loading, setLoading] = useState(true);
     const [formVisible, setFormVisible] = useState(false);
+    
+    // Health & Alerts
+    const [activeAlerts, setActiveAlerts] = useState([]);
+    const [selectedHealthVehicle, setSelectedHealthVehicle] = useState(null);
+    const [toasts, setToasts] = useState([]);
+
+    // WebSocket
+    const stompClientRef = useRef(null);
 
     // Form Stats
     const [vehicleForm, setVehicleForm] = useState({
@@ -29,7 +55,8 @@ const DriverVehiclesPage = () => {
 
     const fetchVehicles = useCallback(async () => {
         try {
-            const res = await axios.get(`/api/driver/${driverId}/vehicles`);
+            const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
+            const res = await axios.get(`/api/driver/${driverId}/vehicles`, config);
             setVehicles(res.data);
             if (res.data.length === 0) setFormVisible(true);
             setLoading(false);
@@ -39,13 +66,68 @@ const DriverVehiclesPage = () => {
         }
     }, [driverId]);
 
+    const fetchAlerts = useCallback(async () => {
+        if (!driverId) return;
+        try {
+            const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
+            const res = await axios.get(`/api/health/alerts/driver/${driverId}`, config);
+            setActiveAlerts(res.data);
+        } catch(e) { console.error("Error fetching alerts", e); }
+    }, [driverId]);
+
     useEffect(() => {
         if (driverId) {
             fetchVehicles();
+            fetchAlerts();
+            connectWebSocket();
         } else {
              setLoading(false);
         }
-    }, [fetchVehicles, driverId]);
+
+        return () => {
+            if (stompClientRef.current) {
+                stompClientRef.current.deactivate();
+            }
+        };
+    }, [fetchVehicles, fetchAlerts, driverId]);
+
+    const connectWebSocket = () => {
+        const socket = new SockJS('http://localhost:8080/ws');
+        const client = new Client({
+            webSocketFactory: () => socket,
+            onConnect: () => {
+                // Subscribe to Driver Alerts
+                client.subscribe(`/topic/alerts/driver/${driverId}`, (message) => {
+                    const alert = JSON.parse(message.body);
+                    handleNewAlert(alert);
+                });
+            },
+            onStompError: (frame) => {
+                console.error('Broker reported error: ' + frame.headers['message']);
+                console.error('Additional details: ' + frame.body);
+            },
+        });
+
+        client.activate();
+        stompClientRef.current = client;
+    };
+
+    const handleNewAlert = (alert) => {
+        // Add to active alerts list
+        setActiveAlerts(prev => [alert, ...prev]);
+        
+        // Show Toast
+        const id = Date.now();
+        setToasts(prev => [...prev, { ...alert, id }]);
+        
+        // Auto remove toast after 5s
+        setTimeout(() => {
+             setToasts(prev => prev.filter(t => t.id !== id));
+        }, 5000);
+
+        // Refresh vehicles to update status if needed
+        fetchVehicles();
+    };
 
     const handleTypeChange = (e) => {
         const type = e.target.value;
@@ -63,7 +145,8 @@ const DriverVehiclesPage = () => {
             return;
         }
         try {
-            await axios.post(`/api/driver/${driverId}/vehicle/add`, vehicleForm);
+            const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
+            await axios.post(`/api/driver/${driverId}/vehicle/add`, vehicleForm, config);
             alert("Vehicle Submitted for Approval!");
             setFormVisible(false);
             fetchVehicles();
@@ -81,6 +164,15 @@ const DriverVehiclesPage = () => {
         <div className="min-h-screen bg-slate-950 pb-20">
              <Navbar />
              
+             {/* Toasts Container */}
+             <div className="fixed top-24 right-6 z-[1000] flex flex-col gap-2 pointer-events-none">
+                 <div className="pointer-events-auto flex flex-col gap-2">
+                     {toasts.map(t => (
+                         <AlertToast key={t.id} alert={t} onClose={() => setToasts(prev => prev.filter(x => x.id !== t.id))} />
+                     ))}
+                 </div>
+             </div>
+
              <div className="pt-24 max-w-7xl mx-auto px-6 animate-fade-in">
                 
                 {/* Header Section */}
@@ -93,7 +185,7 @@ const DriverVehiclesPage = () => {
                             <ArrowLeft className="w-4 h-4 mr-1" /> Back to Dashboard
                         </button>
                         <h1 className="text-3xl font-bold text-white">My Fleet</h1>
-                        <p className="text-slate-400 text-sm mt-1">Manage vehicles, track fuel & location</p>
+                        <p className="text-slate-400 text-sm mt-1">Manage vehicles, track fuel & health</p>
                     </div>
 
                     <button 
@@ -218,17 +310,32 @@ const DriverVehiclesPage = () => {
                         </div>
                      :
                      vehicles.map(v => (
-                        <VehicleCard key={v.id} vehicle={v} refresh={fetchVehicles} />
+                        <VehicleCard 
+                            key={v.id} 
+                            vehicle={v} 
+                            refresh={fetchVehicles} 
+                            alertCount={activeAlerts.filter(a => a.vehicleId === v.id || a.vehicle?.id === v.id).length}
+                            onViewHealth={() => setSelectedHealthVehicle(v)}
+                        />
                      ))
                     }
                 </div>
             </div>
+
+            {/* Health Modal */}
+            {selectedHealthVehicle && (
+                <DriverVehicleHealthModal 
+                    vehicle={selectedHealthVehicle} 
+                    onClose={() => setSelectedHealthVehicle(null)} 
+                    refreshData={() => { fetchVehicles(); fetchAlerts(); }}
+                />
+            )}
         </div>
     );
 };
 
 // Extracted Component for cleaner logic per card
-const VehicleCard = ({ vehicle, refresh }) => {
+const VehicleCard = ({ vehicle, refresh, alertCount = 0, onViewHealth }) => {
     const [simulating, setSimulating] = useState(false);
     const [localVehicle, setLocalVehicle] = useState(vehicle);
     const [intervalId, setIntervalId] = useState(null);
@@ -250,11 +357,21 @@ const VehicleCard = ({ vehicle, refresh }) => {
         return () => { if (intervalId) clearInterval(intervalId); };
     }, [intervalId]);
 
+    const getHealthColor = (val) => (val === undefined || val === null ? 100 : val) > 50 ? 'text-emerald-500' : (val === undefined || val === null ? 100 : val) > 20 ? 'text-amber-500' : 'text-red-500';
+    const getHealthColorBg = (val) => (val === undefined || val === null ? 100 : val) > 50 ? 'bg-emerald-500' : (val === undefined || val === null ? 100 : val) > 20 ? 'bg-amber-500' : 'bg-red-500';
+    const getHealthStatusColor = (status) => {
+        if(status === 'CRITICAL') return 'text-red-500';
+        if(status === 'DUE' || status === 'WARNING') return 'text-amber-500';
+        // Default to emerald for HEALTHY or null
+        return 'text-emerald-500';
+    };
+
     const toggleSimulation = async () => {
+        const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
         try {
             if (!simulating) {
                 // START
-                await axios.post(`/api/simulation/start/${vehicle.id}`);
+                await axios.post(`/api/simulation/start-test-drive/${vehicle.id}`, {}, config);
                 setSimulating(true);
                 // Poll every 2s
                 const id = setInterval(async () => {
@@ -265,7 +382,7 @@ const VehicleCard = ({ vehicle, refresh }) => {
                 setIntervalId(id);
             } else {
                 // STOP
-                await axios.post(`/api/simulation/stop/${vehicle.id}`);
+                await axios.post(`/api/simulation/stop/${vehicle.id}`, {}, config);
                 setSimulating(false);
                 if (intervalId) clearInterval(intervalId);
                 refresh();
@@ -279,7 +396,7 @@ const VehicleCard = ({ vehicle, refresh }) => {
     };
 
     return (
-        <div className={`glass-card bg-slate-900/60 p-6 rounded-2xl border transition-all shadow-xl ${simulating ? 'border-emerald-500/50 shadow-emerald-500/10' : 'border-slate-800 hover:border-slate-600'}`}>
+        <div className={`glass-card bg-slate-900/60 p-6 rounded-2xl border transition-all shadow-xl ${simulating ? 'border-emerald-500/50 shadow-emerald-500/10' : alertCount > 0 ? 'border-amber-500/30' : 'border-slate-800 hover:border-slate-600'}`}>
             <div className="flex justify-between items-start mb-6">
                 <div>
                     <h3 className="text-2xl font-bold text-white flex items-center gap-3">
@@ -292,12 +409,25 @@ const VehicleCard = ({ vehicle, refresh }) => {
                     </p>
                 </div>
                 <div className="text-right">
-                    <button 
-                        onClick={toggleSimulation}
-                        className={`text-xs font-bold px-3 py-1.5 rounded-lg border flex items-center gap-2 transition-all ${simulating ? 'bg-red-500/10 text-red-400 border-red-500/20 animate-pulse' : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'}`}
-                    >
-                        {simulating ? 'STOP TEST DRIVE' : 'START TEST DRIVE'}
-                    </button>
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={onViewHealth}
+                            className="relative text-xs font-bold px-3 py-1.5 rounded-lg border flex items-center gap-2 transition-all bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20"
+                        >
+                            <Activity className="w-3 h-3" /> Health Report
+                            {alertCount > 0 && (
+                                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] text-white">
+                                    {alertCount}
+                                </span>
+                            )}
+                        </button>
+                        <button 
+                            onClick={toggleSimulation}
+                            className={`text-xs font-bold px-3 py-1.5 rounded-lg border flex items-center gap-2 transition-all ${simulating ? 'bg-red-500/10 text-red-400 border-red-500/20 animate-pulse' : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'}`}
+                        >
+                            {simulating ? 'STOP' : 'TEST DRIVE'}
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -337,6 +467,64 @@ const VehicleCard = ({ vehicle, refresh }) => {
                             <PenTool className="w-3 h-3" /> Service Due
                         </div>
                         <div className="text-sm font-bold text-white mt-1">{localVehicle.nextServiceDate ? localVehicle.nextServiceDate : <span className="text-emerald-400">Up to date</span>}</div>
+                    </div>
+                </div>
+
+                {/* HEALTH MONITORING GRID */}
+                <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800/50">
+                     <div className="flex items-center gap-2 text-slate-400 text-xs mb-3 uppercase tracking-wider">
+                        <Activity className="w-3 h-3" /> Vehicle Health
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                        {/* Engine */}
+                        <div>
+                             <div className="flex justify-between text-xs mb-1 text-slate-400">
+                                <span>Engine</span>
+                                <span className={getHealthColor(localVehicle.engineHealth)}>{localVehicle.engineHealth || 100}%</span>
+                             </div>
+                             <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                <div className={`h-full ${getHealthColorBg(localVehicle.engineHealth)}`} style={{width: `${localVehicle.engineHealth || 100}%`}}></div>
+                             </div>
+                        </div>
+                        {/* Tires */}
+                        <div>
+                             <div className="flex justify-between text-xs mb-1 text-slate-400">
+                                <span>Tires</span>
+                                <span className={getHealthColor(localVehicle.tireHealth)}>{localVehicle.tireHealth || 100}%</span>
+                             </div>
+                             <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                <div className={`h-full ${getHealthColorBg(localVehicle.tireHealth)}`} style={{width: `${localVehicle.tireHealth || 100}%`}}></div>
+                             </div>
+                        </div>
+                        {/* Brakes */}
+                        <div>
+                             <div className="flex justify-between text-xs mb-1 text-slate-400">
+                                <span>Brakes</span>
+                                <span className={getHealthColor(localVehicle.brakePadHealth)}>{localVehicle.brakePadHealth || 100}%</span>
+                             </div>
+                             <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                <div className={`h-full ${getHealthColorBg(localVehicle.brakePadHealth)}`} style={{width: `${localVehicle.brakePadHealth || 100}%`}}></div>
+                             </div>
+                        </div>
+                        {/* Oil */}
+                        <div>
+                             <div className="flex justify-between text-xs mb-1 text-slate-400">
+                                <span>Oil</span>
+                                <span className={getHealthColor(localVehicle.oilLevel)}>{localVehicle.oilLevel || 100}%</span>
+                             </div>
+                             <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                <div className={`h-full ${getHealthColorBg(localVehicle.oilLevel)}`} style={{width: `${localVehicle.oilLevel || 100}%`}}></div>
+                             </div>
+                        </div>
+                    </div>
+
+                    {/* Overall Status */}
+                    <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+                        <div className="text-xs text-slate-500">Overall Status</div>
+                        <div className={`text-sm font-bold ${getHealthStatusColor(localVehicle.healthStatus)}`}>
+                            {localVehicle.healthStatus || 'HEALTHY'} ({localVehicle.healthScore || 100})
+                        </div>
                     </div>
                 </div>
 

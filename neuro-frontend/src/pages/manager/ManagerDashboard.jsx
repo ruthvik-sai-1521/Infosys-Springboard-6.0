@@ -2,14 +2,20 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Navbar from '../../components/Navbar';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
-import { LayoutDashboard, Car, Users, MessageSquare, Search, Phone, Mail, AlertTriangle, Map as MapIcon, UserCircle, Briefcase, Building, MapPin } from 'lucide-react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, Car, Users, MessageSquare, Search, Phone, Mail, AlertTriangle, Map as MapIcon, UserCircle, Briefcase, Building, MapPin, Activity } from 'lucide-react';
 import { LiveMap } from '../../components/maps';
+import MaintenanceDashboard from './MaintenanceDashboard';
 
 const defaultCenter = { lat: 12.9716, lng: 77.5946 };
 
 const ManagerDashboard = () => {
     const { user: authUser } = useAuth(); 
-    const [activeSection, setActiveSection] = useState('overview');
+    const { section } = useParams();
+    const navigate = useNavigate();
+    
+    // Initialize activeSection from URL param or default to 'overview'
+    const [activeSection, setActiveSection] = useState(section || 'overview');
     
     // Data States
     const [trips, setTrips] = useState([]);
@@ -17,12 +23,13 @@ const ManagerDashboard = () => {
     const [users, setUsers] = useState([]); 
     const [reviews, setReviews] = useState([]);
     const [managerProfile, setManagerProfile] = useState(null);
+    const [healthBadgeCount, setHealthBadgeCount] = useState(0);
 
     // Search & Map States
     const [userSearch, setUserSearch] = useState("");
     const [vehicleSearch, setVehicleSearch] = useState("");
     const [mapSearch, setMapSearch] = useState("");
-    const [mapCenter, setMapCenter] = useState(defaultCenter);
+    const [, setMapCenter] = useState(defaultCenter);
     const [selectedMapVehicle, setSelectedMapVehicle] = useState(null);
 
     // Contact Modal
@@ -43,20 +50,32 @@ const ManagerDashboard = () => {
         message: ''
     });
 
+    // Sync activeSection with URL param
+    useEffect(() => {
+        if (section) {
+            setActiveSection(section);
+        }
+    }, [section]);
+
     const fetchData = useCallback(async () => {
         const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
         try {
-            const [tRes, uRes, rRes, vRes] = await Promise.all([
+            const [tRes, uRes, rRes, vRes, healthRes] = await Promise.all([
                 axios.get('/api/trips/all', config),
                 axios.get('/api/admin/users', config),
                 axios.get('/api/reviews/all', config),
-                axios.get('/api/admin/vehicles', config) 
+                axios.get('/api/admin/vehicles', config),
+                axios.get('/api/health/fleet/summary', config)
             ]);
             
             setTrips(tRes.data);
             setUsers(uRes.data);
             setReviews(rRes.data);
             setVehicles(vRes.data);
+            
+            if (healthRes.data) {
+                setHealthBadgeCount(healthRes.data.criticalAlerts || 0);
+            }
 
             if (authUser?.username) {
                 const profile = uRes.data.find(u => u.username === authUser.username);
@@ -406,7 +425,14 @@ const ManagerDashboard = () => {
                                  <MapPin className="w-3 h-3" /> View on Map
                              </button>
                          ) : <span className="text-slate-500">No location</span>}
-                    </div>
+                          
+                           <button 
+                               onClick={(e) => { e.stopPropagation(); window.location.href = `/vehicle/${v.id}/health`; }} 
+                               className="flex items-center gap-1 text-blue-400 bg-blue-500/10 px-2 py-1 rounded hover:bg-blue-500/20 transition-colors ml-2"
+                           >
+                               <Activity className="w-3 h-3" /> Health
+                           </button>
+                     </div>
                     </div>
                 ))}
                 {vehicles.length === 0 && <p className="text-slate-500 col-span-full">No verified vehicles found.</p>}
@@ -656,13 +682,20 @@ const ManagerDashboard = () => {
         );
     };
 
-    const SidebarItem = ({ icon, label, active, onClick }) => (
+    const SidebarItem = ({ icon, label, active, onClick, badge }) => (
         <button 
             onClick={onClick}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all ${active ? 'bg-blue-600 shadow-lg shadow-blue-900/40 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
+            className={`w-full flex items-center justify-between px-4 py-3 rounded-xl font-medium transition-all ${active ? 'bg-blue-600 shadow-lg shadow-blue-900/40 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
         >
-            <div className={`w-5 h-5 ${active ? 'text-white' : 'text-slate-500 group-hover:text-white'}`}>{icon}</div>
-            {label}
+            <div className="flex items-center gap-3">
+                <div className={`w-5 h-5 ${active ? 'text-white' : 'text-slate-500 group-hover:text-white'}`}>{icon}</div>
+                {label}
+            </div>
+            {badge > 0 && (
+                <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                    {badge}
+                </span>
+            )}
         </button>
     );
 
@@ -674,12 +707,19 @@ const ManagerDashboard = () => {
                      <h1 className="text-xl font-extrabold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">Manager Portal</h1>
                  </div>
                  <nav className="flex-1 p-4 space-y-2">
-                     <SidebarItem icon={<LayoutDashboard />} label="Overview" active={activeSection === 'overview'} onClick={() => setActiveSection('overview')} />
-                     <SidebarItem icon={<MapIcon />} label="Live Map" active={activeSection === 'map'} onClick={() => setActiveSection('map')} />
-                     <SidebarItem icon={<Car />} label="Fleet" active={activeSection === 'fleet'} onClick={() => setActiveSection('fleet')} />
-                     <SidebarItem icon={<Users />} label="Directory" active={activeSection === 'users'} onClick={() => setActiveSection('users')} />
-                     <SidebarItem icon={<MessageSquare />} label="Feedbacks" active={activeSection === 'feedback'} onClick={() => setActiveSection('feedback')} />
-                     <SidebarItem icon={<Mail />} label="Admin Requests" active={activeSection === 'requests'} onClick={() => setActiveSection('requests')} />
+                     <SidebarItem icon={<LayoutDashboard />} label="Overview" active={activeSection === 'overview'} onClick={() => navigate('/manager/overview')} />
+                     <SidebarItem icon={<MapIcon />} label="Live Map" active={activeSection === 'map'} onClick={() => navigate('/manager/map')} />
+                     <SidebarItem icon={<Car />} label="Fleet" active={activeSection === 'fleet'} onClick={() => navigate('/manager/fleet')} />
+                     <SidebarItem 
+                        icon={<Activity />} 
+                        label="Maintenance & Health" 
+                        active={activeSection === 'maintenance'} 
+                        onClick={() => navigate('/manager/maintenance')} 
+                        badge={healthBadgeCount} 
+                     />
+                     <SidebarItem icon={<Users />} label="Directory" active={activeSection === 'users'} onClick={() => navigate('/manager/users')} />
+                     <SidebarItem icon={<MessageSquare />} label="Feedbacks" active={activeSection === 'feedback'} onClick={() => navigate('/manager/feedback')} />
+                     <SidebarItem icon={<Mail />} label="Admin Requests" active={activeSection === 'requests'} onClick={() => navigate('/manager/requests')} />
                  </nav>
                  <div className="p-4 border-t border-slate-800">
                      <div className="flex items-center gap-3 mb-4 px-2">
@@ -700,6 +740,7 @@ const ManagerDashboard = () => {
                     {activeSection === 'overview' && renderOverview()}
                     {activeSection === 'map' && renderMap()}
                     {activeSection === 'fleet' && renderFleet()}
+                    {(activeSection === 'health' || activeSection === 'maintenance') && <MaintenanceDashboard />}
                     {activeSection === 'users' && renderUsers()}
                     {activeSection === 'feedback' && renderFeedback()}
                     {activeSection === 'requests' && renderAdminRequests()}
@@ -735,8 +776,6 @@ const ManagerDashboard = () => {
              {/* VEHICLE DETAIL MODAL */}
              {vehicleModalOpen && selectedVehicle && (() => {
                  const driver = users.find(u => u.id === selectedVehicle.driverId);
-                 const driverTrips = trips.filter(t => t.driver?.id === selectedVehicle.driverId);
-                 const driverFeedbacks = reviews.filter(r => r.driver?.id === selectedVehicle.driverId);
                  
                  return (
                      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in overflow-y-auto">
