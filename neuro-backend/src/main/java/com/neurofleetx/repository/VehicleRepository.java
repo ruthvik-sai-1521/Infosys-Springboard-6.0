@@ -46,4 +46,7 @@ public interface VehicleRepository extends JpaRepository<Vehicle, Long> {
 
     @Query("SELECT v FROM Vehicle v WHERE v.kmsSinceLastService >= :kms OR v.nextServiceDate <= :date")
     List<Vehicle> findDueForService(@Param("kms") Integer kms, @Param("date") String date);
+
+    // Report methods
+    long countByDriverId(Long driverId);
 }

@@ -226,89 +226,40 @@ public class VehicleHealthSimulationService {
 
     /**
      * Perform maintenance on vehicle
+     * Manager confirms maintenance → Only notify driver (NO metric updates)
+     * Metrics will be updated when driver resolves the notification
      */
     @Transactional
     public void performMaintenance(Long vehicleId, List<String> components) {
         Vehicle vehicle = vehicleRepository.findById(vehicleId)
                 .orElseThrow(() -> new RuntimeException("Vehicle not found"));
 
-        if (components.contains("FULL_SERVICE")) {
-            vehicle.setEngineHealth(100);
-            vehicle.setTireHealth(100);
-            vehicle.setBatteryHealth(100);
-            vehicle.setBrakePadHealth(100);
-            vehicle.setOilLevel(100);
-            vehicle.setCoolantLevel(100);
-            vehicle.setTransmissionHealth(100);
-            vehicle.setTirePressureFL(32.0); // Reset to standard
-            vehicle.setTirePressureFR(32.0);
-            vehicle.setTirePressureRL(32.0);
-            vehicle.setTirePressureRR(32.0);
-
-            vehicle.setLastServiceDate(LocalDateTime.now());
-            vehicle.setKmsSinceLastService(0);
-            // Reset next service date + 6 months
-            vehicle.setNextServiceDate(java.time.LocalDate.now().plusMonths(6).toString());
-
-            // Resolve all alerts
-            resolveVehicleAlerts(vehicle, "FULL_SERVICE");
-
-        } else {
-            for (String component : components) {
-                switch (component) {
-                    case "ENGINE":
-                        vehicle.setEngineHealth(100);
-                        break;
-                    case "TIRES":
-                        vehicle.setTireHealth(100);
-                        vehicle.setTirePressureFL(32.0);
-                        vehicle.setTirePressureFR(32.0);
-                        vehicle.setTirePressureRL(32.0);
-                        vehicle.setTirePressureRR(32.0);
-                        break;
-                    case "BATTERY":
-                        vehicle.setBatteryHealth(100);
-                        break;
-                    case "BRAKES":
-                        vehicle.setBrakePadHealth(100);
-                        break;
-                    case "OIL":
-                        vehicle.setOilLevel(100);
-                        break;
-                    case "COOLANT":
-                        vehicle.setCoolantLevel(100);
-                        break;
-                    case "TRANSMISSION":
-                        vehicle.setTransmissionHealth(100);
-                        break;
-                    default:
-                        System.out.println("Unknown component for maintenance: " + component);
-                        break;
-                }
-                resolveVehicleAlerts(vehicle, component);
-            }
-        }
-
-        healthService.updateHealthStatus(vehicle);
-
-        // NEW: Create notification alert for driver
+        // Create notification for driver WITHOUT updating any metrics
         if (vehicle.getDriver() != null) {
-            String componentsList = String.join(", ", components);
+            String componentsList = String.join(",", components); // Store as comma-separated for parsing later
             String message = components.contains("FULL_SERVICE")
-                    ? "Full service maintenance completed. Please verify vehicle condition."
-                    : "Maintenance performed on: " + componentsList + ". Please verify and resolve.";
+                    ? "Full service maintenance completed by manager. Please verify vehicle condition and resolve this alert."
+                    : "Maintenance performed on: " + String.join(", ", components)
+                            + ". Please verify and resolve this alert.";
 
             MaintenanceAlert notification = new MaintenanceAlert();
             notification.setVehicle(vehicle);
+            notification.setDriver(vehicle.getDriver()); // Explicitly set driver
             notification.setAlertType(MaintenanceAlert.AlertType.MAINTENANCE_COMPLETED);
             notification.setSeverity(MaintenanceAlert.AlertSeverity.LOW);
-            notification.setComponent("MAINTENANCE_NOTIFICATION");
-            notification.setTitle("Maintenance Completed");
+            notification.setComponent(componentsList); // Store components for later use
+            notification.setTitle("Maintenance Completed - Please Verify");
             notification.setDescription(message);
             notification.setStatus(MaintenanceAlert.AlertStatus.ACTIVE);
             notification.setCreatedAt(LocalDateTime.now());
 
-            alertRepository.save(notification);
+            MaintenanceAlert saved = alertRepository.save(notification);
+
+            // Broadcast notification to driver
+            alertService.broadcastAlert(saved);
+
+            System.out.println("Maintenance notification sent to driver for vehicle " + vehicleId +
+                    " - Components: " + componentsList);
         }
     }
 

@@ -3,9 +3,10 @@ import Navbar from '../../components/Navbar';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { useParams, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Car, Users, MessageSquare, Search, Phone, Mail, AlertTriangle, Map as MapIcon, UserCircle, Briefcase, Building, MapPin, Activity } from 'lucide-react';
+import { LayoutDashboard, Car, Users, MessageSquare, Search, Phone, Mail, AlertTriangle, Map as MapIcon, UserCircle, Briefcase, Building, MapPin, Activity, FileText } from 'lucide-react';
 import { LiveMap } from '../../components/maps';
 import MaintenanceDashboard from './MaintenanceDashboard';
+import ManagerReportsPage from './ManagerReportsPage';
 
 const defaultCenter = { lat: 12.9716, lng: 77.5946 };
 
@@ -720,6 +721,7 @@ const ManagerDashboard = () => {
                      <SidebarItem icon={<Users />} label="Directory" active={activeSection === 'users'} onClick={() => navigate('/manager/users')} />
                      <SidebarItem icon={<MessageSquare />} label="Feedbacks" active={activeSection === 'feedback'} onClick={() => navigate('/manager/feedback')} />
                      <SidebarItem icon={<Mail />} label="Admin Requests" active={activeSection === 'requests'} onClick={() => navigate('/manager/requests')} />
+                     <SidebarItem icon={<FileText />} label="Reports" active={activeSection === 'reports'} onClick={() => navigate('/manager/reports')} />
                  </nav>
                  <div className="p-4 border-t border-slate-800">
                      <div className="flex items-center gap-3 mb-4 px-2">
@@ -744,6 +746,7 @@ const ManagerDashboard = () => {
                     {activeSection === 'users' && renderUsers()}
                     {activeSection === 'feedback' && renderFeedback()}
                     {activeSection === 'requests' && renderAdminRequests()}
+                    {activeSection === 'reports' && <ManagerReportsPage />}
                 </div>
              </div>
 

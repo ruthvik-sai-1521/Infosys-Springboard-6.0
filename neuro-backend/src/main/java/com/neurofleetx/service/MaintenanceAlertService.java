@@ -178,8 +178,11 @@ public class MaintenanceAlertService {
      * Get alerts for a specific vehicle (excludes RESOLVED alerts)
      */
     public List<AlertDTO> getVehicleAlerts(Long vehicleId) {
-        return alertRepository.findById(vehicleId).stream()
-                .filter(alert -> alert.getStatus() != MaintenanceAlert.AlertStatus.RESOLVED)
+        System.out.println("Fetching alerts for vehicle: " + vehicleId);
+        List<MaintenanceAlert> alerts = alertRepository.findByVehicleIdAndStatusOrderBySeverityDescCreatedAtDesc(
+                vehicleId, MaintenanceAlert.AlertStatus.ACTIVE);
+        System.out.println("Found " + alerts.size() + " active alerts for vehicle " + vehicleId);
+        return alerts.stream()
                 .map(AlertDTO::new)
                 .collect(Collectors.toList());
     }
@@ -214,7 +217,7 @@ public class MaintenanceAlertService {
 
     /**
      * Resolve Alert
-     * Now actually performs maintenance on the affected component
+     * When driver resolves MAINTENANCE_COMPLETED alert, metrics are updated to 100%
      */
     @Transactional
     public AlertDTO resolveAlert(Long alertId, Long userId) {
@@ -227,45 +230,144 @@ public class MaintenanceAlertService {
 
         MaintenanceAlert saved = alertRepository.save(alert);
 
-        // Perform maintenance on the affected component
+        // Apply maintenance fixes when driver resolves
         Vehicle vehicle = alert.getVehicle();
         if (vehicle != null && alert.getComponent() != null) {
-            fixComponent(vehicle, alert.getComponent());
+            // Handle MAINTENANCE_COMPLETED type specially
+            if (alert.getAlertType() == MaintenanceAlert.AlertType.MAINTENANCE_COMPLETED) {
+                // Component field contains comma-separated list of components
+                String[] components = alert.getComponent().split(",");
+                System.out.println("Driver resolving MAINTENANCE_COMPLETED for components: " + alert.getComponent());
+
+                for (String comp : components) {
+                    fixComponent(vehicle, comp.trim());
+                }
+
+                // Resolve related active alerts for these components
+                resolveRelatedAlerts(vehicle, java.util.Arrays.asList(components));
+            } else {
+                // Regular alert - fix single component
+                fixComponent(vehicle, alert.getComponent());
+            }
+
             healthService.updateHealthStatus(vehicle);
             vehicleRepository.save(vehicle);
+
+            // Broadcast health update via WebSocket
+            broadcastHealthUpdate(vehicle);
         }
 
         return new AlertDTO(saved);
     }
 
     /**
+     * Resolve related alerts for the given components after driver verification
+     */
+    private void resolveRelatedAlerts(Vehicle vehicle, java.util.List<String> components) {
+        java.util.List<MaintenanceAlert> activeAlerts = alertRepository.findByVehicleIdAndStatus(
+                vehicle.getId(), MaintenanceAlert.AlertStatus.ACTIVE);
+
+        for (MaintenanceAlert relatedAlert : activeAlerts) {
+            for (String comp : components) {
+                String compUpper = comp.trim().toUpperCase();
+                if (relatedAlert.getComponent() != null &&
+                        (compUpper.equals("FULL_SERVICE") ||
+                                relatedAlert.getComponent().toUpperCase().contains(compUpper))) {
+                    relatedAlert.setStatus(MaintenanceAlert.AlertStatus.RESOLVED);
+                    relatedAlert.setResolvedAt(LocalDateTime.now());
+                    relatedAlert.setResolutionNotes("Auto-resolved by driver after manager maintenance verification");
+                    alertRepository.save(relatedAlert);
+                    System.out.println("Auto-resolved related alert: " + relatedAlert.getTitle());
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
+     * Broadcast health update via WebSocket after metrics change
+     */
+    private void broadcastHealthUpdate(Vehicle vehicle) {
+        if (messagingTemplate != null) {
+            try {
+                long activeAlertCount = alertRepository.countByVehicleIdAndStatus(
+                        vehicle.getId(), MaintenanceAlert.AlertStatus.ACTIVE);
+
+                java.util.Map<String, Object> healthUpdate = new java.util.HashMap<>();
+                healthUpdate.put("vehicleId", vehicle.getId());
+                healthUpdate.put("vehicleNumber", vehicle.getVehicleNumber());
+                healthUpdate.put("healthScore", vehicle.getHealthScore());
+                healthUpdate.put("healthStatus", vehicle.getHealthStatus());
+                healthUpdate.put("activeAlerts", activeAlertCount);
+                healthUpdate.put("timestamp", System.currentTimeMillis());
+
+                messagingTemplate.convertAndSend("/topic/health/vehicle/" + vehicle.getId(), (Object) healthUpdate);
+                messagingTemplate.convertAndSend("/topic/health/fleet", (Object) healthUpdate);
+
+                System.out.println("Broadcasted health update for vehicle " + vehicle.getId());
+            } catch (Exception e) {
+                System.err.println("Error broadcasting health update: " + e.getMessage());
+            }
+        }
+    }
+
+    /**
      * Fix the component by setting its health to 100
-     * This breaks the circular dependency by implementing the fix directly
+     * Supports: FULL_SERVICE, component names with/without suffixes
      */
     private void fixComponent(Vehicle vehicle, String alertComponent) {
         if (alertComponent == null)
             return;
 
-        String upper = alertComponent.toUpperCase();
+        String upper = alertComponent.toUpperCase().trim();
 
+        // Handle FULL_SERVICE - reset everything
+        if (upper.equals("FULL_SERVICE")) {
+            vehicle.setEngineHealth(100);
+            vehicle.setTireHealth(100);
+            vehicle.setBatteryHealth(100);
+            vehicle.setBrakePadHealth(100);
+            vehicle.setOilLevel(100);
+            vehicle.setCoolantLevel(100);
+            vehicle.setTransmissionHealth(100);
+            vehicle.setTirePressureFL(32.0);
+            vehicle.setTirePressureFR(32.0);
+            vehicle.setTirePressureRL(32.0);
+            vehicle.setTirePressureRR(32.0);
+            vehicle.setLastServiceDate(LocalDateTime.now());
+            vehicle.setKmsSinceLastService(0);
+            System.out.println("Applied FULL_SERVICE maintenance to vehicle " + vehicle.getId());
+            return;
+        }
+
+        // Handle individual components (with or without _HEALTH suffix)
         if (upper.contains("ENGINE")) {
             vehicle.setEngineHealth(100);
+            System.out.println("Fixed ENGINE for vehicle " + vehicle.getId());
         } else if (upper.contains("TIRE")) {
             vehicle.setTireHealth(100);
             vehicle.setTirePressureFL(32.0);
             vehicle.setTirePressureFR(32.0);
             vehicle.setTirePressureRL(32.0);
             vehicle.setTirePressureRR(32.0);
+            System.out.println("Fixed TIRES for vehicle " + vehicle.getId());
         } else if (upper.contains("BRAKE")) {
             vehicle.setBrakePadHealth(100);
+            System.out.println("Fixed BRAKES for vehicle " + vehicle.getId());
         } else if (upper.contains("BATTERY")) {
             vehicle.setBatteryHealth(100);
+            System.out.println("Fixed BATTERY for vehicle " + vehicle.getId());
         } else if (upper.contains("OIL")) {
             vehicle.setOilLevel(100);
+            System.out.println("Fixed OIL for vehicle " + vehicle.getId());
         } else if (upper.contains("COOLANT")) {
             vehicle.setCoolantLevel(100);
+            System.out.println("Fixed COOLANT for vehicle " + vehicle.getId());
         } else if (upper.contains("TRANSMISSION")) {
             vehicle.setTransmissionHealth(100);
+            System.out.println("Fixed TRANSMISSION for vehicle " + vehicle.getId());
+        } else {
+            System.out.println("Unknown component: " + alertComponent + " for vehicle " + vehicle.getId());
         }
     }
 

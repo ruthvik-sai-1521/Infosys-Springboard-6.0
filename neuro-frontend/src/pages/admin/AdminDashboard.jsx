@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import Navbar from '../../components/Navbar';
 import axios from 'axios';
-import { LayoutDashboard, Car, Users, MessageSquare, Wrench, Search, Phone, Mail, MapPin } from 'lucide-react';
+import { LayoutDashboard, Car, Users, MessageSquare, Wrench, Search, Phone, Mail, MapPin, FileText } from 'lucide-react';
+import AdminReportsPage from './AdminReportsPage';
 
 const AdminDashboard = () => {
     const [activeSection, setActiveSection] = useState('overview');
@@ -252,6 +253,7 @@ const AdminDashboard = () => {
                      <SidebarItem icon={<Car />} label="Vehicles" active={activeSection === 'vehicles'} onClick={() => setActiveSection('vehicles')} />
                      <SidebarItem icon={<Users />} label="Users" active={activeSection === 'users'} onClick={() => setActiveSection('users')} />
                      <SidebarItem icon={<MessageSquare />} label="Feedbacks" active={activeSection === 'feedback'} onClick={() => setActiveSection('feedback')} />
+                     <SidebarItem icon={<FileText />} label="Reports" active={activeSection === 'reports'} onClick={() => setActiveSection('reports')} />
                  </nav>
                  <div className="p-4 border-t border-slate-800">
                      <button onClick={() => window.location.href='/login'} className="w-full py-2 bg-slate-800 text-red-400 text-sm font-bold rounded-lg hover:bg-slate-700">Logout</button>
@@ -266,6 +268,7 @@ const AdminDashboard = () => {
                     {activeSection === 'vehicles' && renderVehicles()}
                     {activeSection === 'users' && renderUsers()}
                     {activeSection === 'feedback' && renderFeedback()}
+                    {activeSection === 'reports' && <AdminReportsPage />}
                 </div>
              </div>
 

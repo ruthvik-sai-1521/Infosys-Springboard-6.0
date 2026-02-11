@@ -30,6 +30,9 @@ public class VehicleMaintenanceService {
     @Autowired
     private MaintenanceAlertRepository alertRepository;
 
+    @Autowired
+    private MaintenanceAlertService maintenanceAlertService;
+
     // --- Health History ---
 
     public List<VehicleHealthHistory> getHealthHistory(Long vehicleId) {
@@ -66,15 +69,19 @@ public class VehicleMaintenanceService {
         return alertRepository.save(alert);
     }
 
+    /**
+     * Resolve alert - delegates to MaintenanceAlertService which handles metric
+     * updates
+     * for MAINTENANCE_COMPLETED alerts when driver resolves them
+     */
     public MaintenanceAlert resolveAlert(Long alertId, Long userId) {
-        MaintenanceAlert alert = alertRepository.findById(alertId)
+        // Delegate to MaintenanceAlertService which has the complete logic
+        // for handling MAINTENANCE_COMPLETED alerts and updating metrics
+        maintenanceAlertService.resolveAlert(alertId, userId);
+
+        // Return the resolved alert entity from repository
+        return alertRepository.findById(alertId)
                 .orElseThrow(() -> new RuntimeException("Alert not found"));
-
-        alert.setStatus(MaintenanceAlert.AlertStatus.RESOLVED);
-        alert.setResolvedAt(LocalDateTime.now());
-        userRepository.findById(userId).ifPresent(alert::setResolvedBy);
-
-        return alertRepository.save(alert);
     }
 
     public List<Object[]> getAlertSummary() {

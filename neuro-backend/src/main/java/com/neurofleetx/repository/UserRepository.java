@@ -12,4 +12,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
     java.util.List<User> findByVerificationStatus(String verificationStatus);
 
     java.util.List<User> findByRole(String role);
+
+    // Report methods
+    java.util.List<User> findByRoleAndVerificationStatus(String role, String verificationStatus);
 }
