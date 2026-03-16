@@ -83,6 +83,20 @@ public class Vehicle {
     @Column(name = "last_location_update")
     private LocalDateTime lastLocationUpdate;
 
+    // --- Vehicle Hold Status Fields ---
+    // Added for automatic hold when health enters critical zone
+    @Column(name = "hold_status")
+    private String holdStatus = "ACTIVE"; // ACTIVE, ON_HOLD, PENDING_RELEASE
+
+    @Column(name = "hold_reason")
+    private String holdReason;
+
+    @Column(name = "held_at")
+    private LocalDateTime heldAt;
+
+    @Column(name = "released_at")
+    private LocalDateTime releasedAt;
+
     // --- Health Monitoring Fields ---
 
     @Column(name = "engine_health")

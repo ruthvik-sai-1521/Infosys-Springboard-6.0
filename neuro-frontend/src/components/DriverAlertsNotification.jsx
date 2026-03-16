@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, Check, X, AlertTriangle, Info, AlertCircle } from 'lucide-react';
+import { Bell, Check, X, AlertTriangle, Info, AlertCircle, CheckCircle2 } from 'lucide-react';
 import axios from 'axios';
 import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
@@ -64,9 +64,15 @@ const DriverAlertsNotification = ({ driverId }) => {
         const client = new Client({
             webSocketFactory: () => socket,
             onConnect: () => {
+                // Health/vehicle alerts
                 client.subscribe(`/topic/alerts/driver/${driverId}`, (message) => {
                     const alert = JSON.parse(message.body);
                     handleNewAlert(alert);
+                });
+                // Maintenance submission review results from manager
+                client.subscribe(`/topic/notifications/driver/${driverId}`, (message) => {
+                    const notif = JSON.parse(message.body);
+                    handleMaintenanceReviewNotif(notif);
                 });
             },
             onStompError: (frame) => {
@@ -75,6 +81,29 @@ const DriverAlertsNotification = ({ driverId }) => {
         });
         client.activate();
         stompClientRef.current = client;
+    };
+
+    const handleMaintenanceReviewNotif = (notif) => {
+        const approved = notif.approved;
+        const syntheticAlert = {
+            id: 'mnt_' + Date.now(),
+            title: approved ? '✅ Vehicle Released' : '❌ Submission Rejected',
+            description: notif.message || (approved
+                ? `Vehicle ${notif.vehicleNumber} has been released for trips.`
+                : `Your submission for ${notif.vehicleNumber} was rejected. ${notif.reviewNotes || ''}`),
+            severity: approved ? 'INFO' : 'HIGH',
+            status: 'ACTIVE',
+            createdAt: new Date().toISOString(),
+            vehicle: { vehicleNumber: notif.vehicleNumber }
+        };
+        setAlerts(prev => {
+            const updated = [syntheticAlert, ...prev];
+            updateUnreadCount(updated);
+            return updated;
+        });
+        // Show toast
+        setToast(syntheticAlert);
+        setTimeout(() => setToast(null), 7000);
     };
 
     const handleNewAlert = (newAlert) => {
@@ -131,6 +160,7 @@ const DriverAlertsNotification = ({ driverId }) => {
         switch (severity) {
             case 'CRITICAL': return <AlertCircle className="w-4 h-4 text-red-500" />;
             case 'HIGH': return <AlertTriangle className="w-4 h-4 text-orange-500" />;
+            case 'INFO': return <CheckCircle2 className="w-4 h-4 text-emerald-500" />;
             default: return <Info className="w-4 h-4 text-blue-500" />;
         }
     };

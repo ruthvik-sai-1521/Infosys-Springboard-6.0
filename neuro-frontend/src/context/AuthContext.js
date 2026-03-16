@@ -21,7 +21,48 @@ export const AuthProvider = ({ children }) => {
         setUser(JSON.parse(storedUser));
         axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     }
+
+    // Add axios request interceptor to ensure Authorization header is always included
+    const requestInterceptor = axios.interceptors.request.use(
+      (config) => {
+        const currentToken = localStorage.getItem('token');
+        if (currentToken) {
+          config.headers['Authorization'] = `Bearer ${currentToken}`;
+        } else {
+          console.warn('⚠️ No authentication token found in localStorage');
+        }
+        return config;
+      },
+      (error) => {
+        return Promise.reject(error);
+      }
+    );
+
+    // Add axios response interceptor to handle 401 errors globally
+    const responseInterceptor = axios.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response && error.response.status === 401) {
+          console.error('🔒 Authentication failed (401). Token may have expired. Logging out...');
+          // Auto-logout on 401 to clear invalid token
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          delete axios.defaults.headers.common['Authorization'];
+          setUser(null);
+          // Redirect to login page
+          window.location.href = '/';
+        }
+        return Promise.reject(error);
+      }
+    );
+
     setLoading(false);
+
+    // Cleanup interceptors on unmount
+    return () => {
+      axios.interceptors.request.eject(requestInterceptor);
+      axios.interceptors.response.eject(responseInterceptor);
+    };
   }, []);
 
   const login = async (email, password, role) => {

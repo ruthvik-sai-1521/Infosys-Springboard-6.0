@@ -49,4 +49,7 @@ public interface VehicleRepository extends JpaRepository<Vehicle, Long> {
 
     // Report methods
     long countByDriverId(Long driverId);
+
+    // Vehicle Hold Status methods
+    List<Vehicle> findByHoldStatus(String holdStatus);
 }

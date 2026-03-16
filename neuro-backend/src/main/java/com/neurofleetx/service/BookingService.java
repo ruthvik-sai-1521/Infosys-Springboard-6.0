@@ -30,23 +30,22 @@ public class BookingService {
         Trip trip = tripRepository.findById(tripId)
                 .orElseThrow(() -> new RuntimeException("Trip not found"));
 
-        int seatsNeeded = seatNumbers.size();
+        // When seat selection is disabled, treat as 1 seat booking
+        java.util.List<String> safeSeats = (seatNumbers != null) ? seatNumbers : java.util.List.of();
+        boolean noSeatSelection = safeSeats.isEmpty();
+        int seatsNeeded = noSeatSelection ? 1 : safeSeats.size();
 
         if (trip.getAvailableSeats() < seatsNeeded) {
             throw new RuntimeException("Not enough seats available");
         }
 
-        // Check availability of specific seats
-        List<Booking> bookings = bookingRepository.findByTripIdOrderByIdDesc(tripId); // Changed from existingBookings
-                                                                                      // and tripId
-        for (Booking b : bookings) { // Changed from existingBookings
-            String booked = b.getSeatNumbers();
-            if (booked != null) {
-                for (String s : seatNumbers) {
-                    if (booked.contains(s)) {
-                        // Simple contains check might fail for "1" vs "11", but assuming single digits
-                        // or clear separation logic is acceptable for MVP
-                        // Better: split by comma and check
+        // Check for duplicate seat conflicts (only when specific seats are selected)
+        if (!noSeatSelection) {
+            List<Booking> existingBookings = bookingRepository.findByTripIdOrderByIdDesc(tripId);
+            for (Booking b : existingBookings) {
+                String booked = b.getSeatNumbers();
+                if (booked != null) {
+                    for (String s : safeSeats) {
                         String[] taken = booked.split(",");
                         for (String take : taken) {
                             if (take.trim().equals(s.trim())) {
@@ -58,9 +57,13 @@ public class BookingService {
             }
         }
 
-        // Deduct seats
+        // Deduct seats from available count
         trip.setAvailableSeats(trip.getAvailableSeats() - seatsNeeded);
         tripRepository.save(trip);
+
+        // Calculate fare — use trip.getFare() directly (already computed per-trip on
+        // creation)
+        double bookingFare = trip.getFare() != null ? trip.getFare() : 0.0;
 
         // Create booking
         Booking booking = new Booking();
@@ -69,8 +72,8 @@ public class BookingService {
                 .orElseThrow(() -> new RuntimeException("Customer not found"));
         booking.setCustomer(customer);
         booking.setSeatsBooked(seatsNeeded);
-        booking.setSeatNumbers(String.join(",", seatNumbers));
-        booking.setFare(trip.getFare() * seatsNeeded);
+        booking.setSeatNumbers(noSeatSelection ? "" : String.join(",", safeSeats));
+        booking.setFare(bookingFare);
         booking.setStatus("CONFIRMED");
         booking.setBookingTime(LocalDateTime.now());
 

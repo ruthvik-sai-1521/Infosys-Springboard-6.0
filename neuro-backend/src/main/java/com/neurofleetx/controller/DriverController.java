@@ -66,7 +66,50 @@ public class DriverController {
         return userRepository.findById(driverId).orElseThrow(() -> new RuntimeException("Driver not found"));
     }
 
-    @PostMapping("/{driverId}/vehicle/add")
+    @PostMapping(value = "/{driverId}/vehicle/add", consumes = "multipart/form-data")
+    public ResponseEntity<?> addVehicleWithDocuments(
+            @PathVariable Long driverId,
+            @RequestParam("vehicleNumber") String vehicleNumber,
+            @RequestParam("type") String type,
+            @RequestParam(value = "seatCount", defaultValue = "5") Integer seatCount,
+            @RequestParam(value = "fuelLevel", defaultValue = "100") Integer fuelLevel,
+            @RequestParam(value = "kmsDriven", defaultValue = "0") Integer kmsDriven,
+            @RequestParam(value = "mileage", defaultValue = "0") Double mileage,
+            @RequestParam(value = "fuelCapacity", defaultValue = "0") Double fuelCapacity,
+            @RequestParam(value = "rcFile", required = false) org.springframework.web.multipart.MultipartFile rcFile,
+            @RequestParam(value = "insuranceFile", required = false) org.springframework.web.multipart.MultipartFile insuranceFile) {
+
+        return userRepository.findById(driverId).map(driver -> {
+            try {
+                Vehicle vehicle = new Vehicle();
+                vehicle.setDriver(driver);
+                vehicle.setVehicleNumber(vehicleNumber);
+                vehicle.setType(type);
+                vehicle.setSeatCount(seatCount);
+                vehicle.setFuelLevel(fuelLevel);
+                vehicle.setKmsDriven(kmsDriven);
+                vehicle.setMileage(mileage);
+                vehicle.setFuelCapacity(fuelCapacity);
+                vehicle.setStatus("PENDING_ADMIN_APPROVAL");
+
+                if (rcFile != null && !rcFile.isEmpty()) {
+                    vehicle.setRcPdfUrl(fileStorageService.storeFile(rcFile));
+                }
+                if (insuranceFile != null && !insuranceFile.isEmpty()) {
+                    vehicle.setInsurancePdfUrl(fileStorageService.storeFile(insuranceFile));
+                }
+
+                vehicleRepository.save(vehicle);
+                return ResponseEntity.ok(Map.of("message", "Vehicle submitted for admin verification."));
+            } catch (Exception e) {
+                return ResponseEntity.internalServerError()
+                        .body(Map.of("error", "Failed to add vehicle: " + e.getMessage()));
+            }
+        }).orElse(ResponseEntity.badRequest().body(Map.of("error", "Driver not found")));
+    }
+
+    /** Fallback JSON endpoint kept for backward compatibility */
+    @PostMapping(value = "/{driverId}/vehicle/add", consumes = "application/json")
     public ResponseEntity<?> addVehicle(@PathVariable Long driverId, @RequestBody Vehicle vehicle) {
         return userRepository.findById(driverId).map(driver -> {
             vehicle.setDriver(driver);

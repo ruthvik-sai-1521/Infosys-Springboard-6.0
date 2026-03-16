@@ -77,22 +77,92 @@ const AdminDriverPage = () => {
             .catch(err => alert("Error processing request"));
     };
 
+    const getDocUrl = (path) => {
+        if (!path) return null;
+        if (path.startsWith('http')) return path;
+        return `http://localhost:8080${path}`;
+    };
+
     const renderPendingDrivers = () => (
         <div className="space-y-4">
             {pendingDrivers.length === 0 && <p className="text-slate-400">No pending driver approvals.</p>}
             {pendingDrivers.map(driver => (
-                <div key={driver.id} className="bg-slate-800 p-6 rounded-lg flex justify-between items-start border border-slate-700">
-                    <div>
-                        <h3 className="text-xl font-bold text-white">{driver.username}</h3>
-                        <p className="text-slate-400">{driver.email}</p>
-                        <p className="text-slate-400">Phone: {driver.mobileNumber}</p>
-                        {driver.drivingLicense && (
-                            <a href={driver.drivingLicense} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline mt-2 inline-block">View License</a>
-                        )}
-                    </div>
-                    <div className="flex gap-3">
-                        <button onClick={() => handleVerifyUser(driver.id, 'APPROVED')} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium transition">Approve</button>
-                        <button onClick={() => handleVerifyUser(driver.id, 'REJECTED')} className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-medium transition">Reject</button>
+                <div key={driver.id} className="bg-slate-800 p-6 rounded-lg border border-slate-700">
+                    <div className="flex items-start gap-5 flex-wrap">
+
+                        {/* Profile Photo */}
+                        <div className="shrink-0">
+                            {driver.profileImage ? (
+                                <a href={getDocUrl(driver.profileImage)} target="_blank" rel="noreferrer" title="Click to view full photo">
+                                    <img
+                                        src={getDocUrl(driver.profileImage)}
+                                        alt="Profile"
+                                        className="w-20 h-20 rounded-xl object-cover border-2 border-slate-600 hover:border-blue-400 transition cursor-pointer"
+                                    />
+                                </a>
+                            ) : (
+                                <div className="w-20 h-20 rounded-xl bg-slate-700 border-2 border-slate-600 flex items-center justify-center text-3xl font-bold text-slate-400">
+                                    {driver.username?.charAt(0).toUpperCase()}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Driver Details */}
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-3 flex-wrap mb-3">
+                                <h3 className="text-xl font-bold text-white">{driver.username}</h3>
+                                <span className="text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded-full">
+                                    Pending Verification
+                                </span>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-slate-400 mb-4">
+                                <span>📧 Email: <span className="text-white">{driver.email}</span></span>
+                                <span>📱 Mobile: <span className="text-white">{driver.mobileNumber || '—'}</span></span>
+                                <span>🪪 Aadhaar: <span className="text-white">
+                                    {driver.aadhaarNumber
+                                        ? `XXXX-XXXX-${driver.aadhaarNumber.toString().slice(-4)}`
+                                        : '—'}
+                                </span></span>
+                                <span>🆔 Driver ID: <span className="text-white">#{driver.id}</span></span>
+                            </div>
+
+                            {/* Documents */}
+                            <div className="flex flex-wrap gap-3">
+                                {driver.drivingLicense ? (
+                                    <a href={getDocUrl(driver.drivingLicense)}
+                                        target="_blank" rel="noreferrer"
+                                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition"
+                                    >
+                                        📄 View Driving License
+                                    </a>
+                                ) : (
+                                    <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-700 text-slate-400 text-xs rounded-lg">
+                                        ⚠️ No License uploaded
+                                    </span>
+                                )}
+                                {driver.profileImage && (
+                                    <a href={getDocUrl(driver.profileImage)}
+                                        target="_blank" rel="noreferrer"
+                                        className="inline-flex items-center gap-2 px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white text-sm font-medium rounded-lg transition"
+                                    >
+                                        🖼️ View Profile Photo
+                                    </a>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex flex-col gap-2 shrink-0">
+                            <button onClick={() => handleVerifyUser(driver.id, 'APPROVED')}
+                                className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-lg font-medium transition whitespace-nowrap">
+                                ✅ Approve Driver
+                            </button>
+                            <button onClick={() => handleVerifyUser(driver.id, 'REJECTED')}
+                                className="bg-red-600 hover:bg-red-500 text-white px-5 py-2 rounded-lg font-medium transition whitespace-nowrap">
+                                ❌ Reject Driver
+                            </button>
+                        </div>
                     </div>
                 </div>
             ))}
@@ -103,19 +173,67 @@ const AdminDriverPage = () => {
         <div className="space-y-4">
             {pendingVehicles.length === 0 && <p className="text-slate-400">No pending vehicle approvals.</p>}
             {pendingVehicles.map(vehicle => (
-                <div key={vehicle.id} className="bg-slate-800 p-6 rounded-lg flex justify-between items-start border border-slate-700">
-                    <div>
-                        <h3 className="text-xl font-bold text-white">{vehicle.vehicleNumber}</h3>
-                         <p className="text-slate-400">Model: {vehicle.vehicleModel} ({vehicle.type})</p>
-                        <p className="text-slate-400">Owner ID: {vehicle.driverId}</p>
-                        <div className="flex gap-4 mt-2 text-sm">
-                             {vehicle.rcDocument && <a href={vehicle.rcDocument} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">RC Doc</a>}
-                             {vehicle.insuranceDocument && <a href={vehicle.insuranceDocument} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">Insurance</a>}
+                <div key={vehicle.id} className="bg-slate-800 p-6 rounded-lg border border-slate-700">
+                    <div className="flex justify-between items-start gap-4 flex-wrap">
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-3 flex-wrap mb-2">
+                                <h3 className="text-xl font-bold text-white">{vehicle.vehicleNumber}</h3>
+                                <span className="text-xs bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded-full font-mono">
+                                    {vehicle.type}
+                                </span>
+                                <span className="text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded-full">
+                                    Pending Approval
+                                </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm text-slate-400 mb-4">
+                                {vehicle.driver && (
+                                    <span>👤 Driver: <span className="text-white">{vehicle.driver.username || `ID:${vehicle.driver.id}`}</span></span>
+                                )}
+                                <span>🪑 Seats: <span className="text-white">{vehicle.seatCount || '—'}</span></span>
+                                <span>⛽ Fuel: <span className="text-white">{vehicle.fuelLevel ?? '—'}%</span></span>
+                                <span>📍 KMs: <span className="text-white">{vehicle.kmsDriven?.toLocaleString() || '—'}</span></span>
+                            </div>
+
+                            {/* Documents */}
+                            <div className="flex flex-wrap gap-3">
+                                {vehicle.rcPdfUrl ? (
+                                    <a href={`http://localhost:8080${vehicle.rcPdfUrl}`}
+                                        target="_blank" rel="noreferrer"
+                                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition"
+                                    >
+                                        📄 View RC Document
+                                    </a>
+                                ) : (
+                                    <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-700 text-slate-400 text-xs rounded-lg">
+                                        ⚠️ No RC uploaded
+                                    </span>
+                                )}
+                                {vehicle.insurancePdfUrl ? (
+                                    <a href={`http://localhost:8080${vehicle.insurancePdfUrl}`}
+                                        target="_blank" rel="noreferrer"
+                                        className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-sm font-medium rounded-lg transition"
+                                    >
+                                        🛡️ View Insurance Doc
+                                    </a>
+                                ) : (
+                                    <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-700 text-slate-400 text-xs rounded-lg">
+                                        ⚠️ No Insurance uploaded
+                                    </span>
+                                )}
+                            </div>
                         </div>
-                    </div>
-                    <div className="flex gap-3">
-                        <button onClick={() => handleVerifyVehicle(vehicle.id, 'AVAILABLE')} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium transition">Approve</button>
-                        <button onClick={() => handleVerifyVehicle(vehicle.id, 'REJECTED')} className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-medium transition">Reject</button>
+
+                        <div className="flex flex-col gap-2 shrink-0">
+                            <button onClick={() => handleVerifyVehicle(vehicle.id, 'AVAILABLE')}
+                                className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-lg font-medium transition flex items-center gap-2 whitespace-nowrap">
+                                ✅ Approve Vehicle
+                            </button>
+                            <button onClick={() => handleVerifyVehicle(vehicle.id, 'REJECTED')}
+                                className="bg-red-600 hover:bg-red-500 text-white px-5 py-2 rounded-lg font-medium transition flex items-center gap-2 whitespace-nowrap">
+                                ❌ Reject Vehicle
+                            </button>
+                        </div>
                     </div>
                 </div>
             ))}

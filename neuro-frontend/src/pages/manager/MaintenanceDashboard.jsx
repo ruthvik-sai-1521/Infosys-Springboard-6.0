@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
-import { useAuth } from '../../context/AuthContext'; // Verify path
+import { useAuth } from '../../context/AuthContext';
+import { Client } from '@stomp/stompjs';
+import SockJS from 'sockjs-client';
 import { 
   Activity, 
   AlertTriangle, 
@@ -11,7 +13,11 @@ import {
   Wrench,
   CheckCircle,
   X,
-  Search
+  Search,
+  ClipboardList,
+  CheckCircle2,
+  XCircle,
+  Clock
 } from 'lucide-react';
 
 // Components
@@ -23,7 +29,7 @@ import VehicleHealthCard from '../../components/maintenance/VehicleHealthCard';
 
 const MaintenanceDashboard = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('OVERVIEW'); // OVERVIEW, VEHICLES, ALERTS, TRENDS
+  const [activeTab, setActiveTab] = useState('OVERVIEW'); // OVERVIEW, VEHICLES, ALERTS, TRENDS, SUBMISSIONS
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -31,8 +37,17 @@ const MaintenanceDashboard = () => {
 
   // Data States
   const [fleetSummary, setFleetSummary] = useState(null);
-  const [trendData, setTrendData] = useState(null); // Will need separate endpoint or logic
+  const [trendData, setTrendData] = useState(null);
   const [allAlerts, setAllAlerts] = useState([]);
+  const [pendingSubmissions, setPendingSubmissions] = useState([]);
+  const [submissionBadge, setSubmissionBadge] = useState(0);
+
+  // Submission review state
+  const [reviewNotes, setReviewNotes] = useState({});
+  const [reviewingId, setReviewingId] = useState(null);
+
+  // WebSocket
+  const stompClientRef = useRef(null);
   
   // Modal States
   const [selectedVehicle, setSelectedVehicle] = useState(null); // For View Details
@@ -56,20 +71,22 @@ const MaintenanceDashboard = () => {
       const token = localStorage.getItem('token');
       const config = { headers: { Authorization: `Bearer ${token}` } };
 
-      const [summaryRes, alertsRes, trendRes] = await Promise.all([
+      const [summaryRes, alertsRes, trendRes, submissionsRes] = await Promise.all([
         axios.get('http://localhost:8080/api/health/fleet/summary', config),
         axios.get('http://localhost:8080/api/health/alerts', config),
-        axios.get('http://localhost:8080/api/health/fleet/trend?days=30', config).catch(() => ({ data: [] })) // Handle if not implemented
+        axios.get('http://localhost:8080/api/health/fleet/trend?days=30', config).catch(() => ({ data: [] })),
+        axios.get('http://localhost:8080/api/maintenance/pending', config).catch(() => ({ data: [] }))
       ]);
 
       setFleetSummary(summaryRes.data);
       setAllAlerts(alertsRes.data);
+      const subs = submissionsRes.data || [];
+      setPendingSubmissions(subs);
+      setSubmissionBadge(subs.length);
       
-      // Handle trend data mock if empty (endpoint returns map with message currently)
       if (trendRes.data && !trendRes.data.message) {
          setTrendData(trendRes.data);
       } else {
-         // Fallback or empty
          setTrendData(null); 
       }
 
@@ -84,6 +101,23 @@ const MaintenanceDashboard = () => {
   useEffect(() => {
     fetchDashboardData();
   }, [fetchDashboardData, refreshKey]);
+
+  // WebSocket for real-time submission notifications
+  useEffect(() => {
+    const socket = new SockJS('http://localhost:8080/ws');
+    const client = new Client({
+      webSocketFactory: () => socket,
+      onConnect: () => {
+        client.subscribe('/topic/maintenance/submissions', () => {
+          // New submission arrived — refresh and bump badge
+          fetchDashboardData();
+        });
+      }
+    });
+    client.activate();
+    stompClientRef.current = client;
+    return () => { if (stompClientRef.current) stompClientRef.current.deactivate(); };
+  }, [fetchDashboardData]);
 
   const handleRefresh = () => {
     setRefreshKey(prev => prev + 1);
@@ -150,13 +184,14 @@ const MaintenanceDashboard = () => {
             { id: 'OVERVIEW', icon: LayoutDashboard, label: 'Overview' },
             { id: 'VEHICLES', icon: Truck, label: 'Vehicles' },
             { id: 'ALERTS', icon: AlertTriangle, label: 'Alerts' },
-            { id: 'TRENDS', icon: TrendingUp, label: 'Trends' }
+            { id: 'TRENDS', icon: TrendingUp, label: 'Trends' },
+            { id: 'SUBMISSIONS', icon: ClipboardList, label: 'Driver Submissions', badge: submissionBadge }
         ].map(tab => (
             <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => { setActiveTab(tab.id); if (tab.id === 'SUBMISSIONS') setSubmissionBadge(0); }}
                 className={`
-                    flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
+                    relative flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
                     ${activeTab === tab.id 
                         ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/40' 
                         : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}
@@ -164,6 +199,11 @@ const MaintenanceDashboard = () => {
             >
                 <tab.icon className="h-4 w-4" />
                 {tab.label}
+                {tab.badge > 0 && (
+                    <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-orange-500 text-[10px] text-white font-bold">
+                        {tab.badge}
+                    </span>
+                )}
             </button>
         ))}
     </div>
@@ -262,6 +302,129 @@ const MaintenanceDashboard = () => {
       );
   };
 
+  // ── Driver Maintenance Submissions Tab ────────────────────────────────
+  const renderSubmissionsTab = () => {
+    const handleReview = async (submissionId, approved) => {
+      const nts = reviewNotes[submissionId] || '';
+      setReviewingId(submissionId);
+      try {
+        const token = localStorage.getItem('token');
+        const config = { headers: { Authorization: `Bearer ${token}` } };
+        const url = `http://localhost:8080/api/maintenance/${submissionId}/${approved ? 'approve' : 'reject'}`;
+        await axios.post(`${url}?managerId=${user?.id || 1}${nts ? `&notes=${encodeURIComponent(nts)}` : ''}`, {}, config);
+        alert(approved ? '✅ Vehicle released and driver notified!' : '❌ Submission rejected and driver notified.');
+        fetchDashboardData();
+      } catch (e) {
+        alert('Failed: ' + (e.response?.data?.error || e.message));
+      }
+      setReviewingId(null);
+    };
+
+    return (
+      <div className="animate-fade-in space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <ClipboardList className="h-5 w-5 text-orange-400" />
+              Driver Maintenance Submissions
+            </h2>
+            <p className="text-slate-400 text-sm mt-1">Review and approve driver submissions to release vehicles from hold.</p>
+          </div>
+          <span className="bg-orange-500/20 text-orange-400 border border-orange-500/30 px-3 py-1 rounded-full text-sm font-bold">
+            {pendingSubmissions.length} Pending
+          </span>
+        </div>
+
+        {pendingSubmissions.length === 0 ? (
+          <div className="py-16 text-center bg-slate-900/40 rounded-2xl border border-slate-800 border-dashed">
+            <CheckCircle2 className="h-12 w-12 text-emerald-500/40 mx-auto mb-4" />
+            <h3 className="text-lg font-bold text-white">All Clear!</h3>
+            <p className="text-slate-400">No pending maintenance submissions to review.</p>
+          </div>
+        ) : (
+          <div className="space-y-5">
+            {pendingSubmissions.map(sub => (
+              <div key={sub.id} className="bg-slate-900 border border-orange-500/30 rounded-2xl overflow-hidden shadow-lg shadow-orange-900/10">
+                {/* Submission Header */}
+                <div className="bg-gradient-to-r from-orange-900/25 to-slate-900 px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-orange-500/20 rounded-xl flex items-center justify-center border border-orange-500/30">
+                      <Wrench className="w-5 h-5 text-orange-400" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-white text-base">
+                        {sub.vehicle?.vehicleNumber}
+                        <span className="ml-2 text-xs text-slate-400 font-mono">{sub.vehicle?.type}</span>
+                      </h3>
+                      <p className="text-xs text-slate-400">
+                        Driver: <span className="text-white font-semibold">{sub.driver?.username}</span>
+                        &nbsp;• Submitted: {new Date(sub.submissionDate).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="flex items-center gap-1.5 text-xs font-bold bg-orange-500/15 text-orange-400 border border-orange-500/25 px-3 py-1 rounded-full">
+                    <Clock className="w-3 h-3" /> Pending Review
+                  </span>
+                </div>
+
+                {/* Submission Body */}
+                <div className="p-6 space-y-5">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+                      <p className="text-xs text-slate-500 uppercase font-bold mb-1">Maintenance Date</p>
+                      <p className="text-white font-semibold">{sub.maintenanceDate}</p>
+                    </div>
+                    <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+                      <p className="text-xs text-slate-500 uppercase font-bold mb-1">Vehicle Hold Status</p>
+                      <p className="text-orange-400 font-semibold">{sub.vehicle?.holdStatus || 'PENDING_RELEASE'}</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+                    <p className="text-xs text-slate-500 uppercase font-bold mb-2">Maintenance Description</p>
+                    <p className="text-slate-200 text-sm leading-relaxed whitespace-pre-wrap">{sub.description || 'No description provided.'}</p>
+                  </div>
+
+                  {/* Review Notes + Actions */}
+                  <div className="border-t border-slate-800 pt-4">
+                    <label className="block text-sm font-semibold text-slate-300 mb-2">Review Notes (optional)</label>
+                    <textarea
+                      rows={2}
+                      placeholder="Add notes to send to the driver..."
+                      value={reviewNotes[sub.id] || ''}
+                      onChange={e => setReviewNotes(n => ({ ...n, [sub.id]: e.target.value }))}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:border-blue-500 outline-none resize-none text-sm mb-4"
+                    />
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => handleReview(sub.id, true)}
+                        disabled={reviewingId === sub.id}
+                        className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-60">
+                        {reviewingId === sub.id
+                          ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          : <CheckCircle2 className="w-4 h-4" />}
+                        Approve & Release Vehicle
+                      </button>
+                      <button
+                        onClick={() => handleReview(sub.id, false)}
+                        disabled={reviewingId === sub.id}
+                        className="flex-1 py-2.5 bg-red-700/80 hover:bg-red-600 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-60">
+                        {reviewingId === sub.id
+                          ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          : <XCircle className="w-4 h-4" />}
+                        Reject Submission
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // --- Main Render ---
 
   if (loading && !fleetSummary) {
@@ -314,6 +477,7 @@ const MaintenanceDashboard = () => {
         {activeTab === 'VEHICLES' && renderVehiclesTab()}
         {activeTab === 'ALERTS' && renderAlertsTab()}
         {activeTab === 'TRENDS' && renderTrendsTab()}
+        {activeTab === 'SUBMISSIONS' && renderSubmissionsTab()}
       </div>
 
       {/* --- MODALS --- */}

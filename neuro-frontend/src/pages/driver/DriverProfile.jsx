@@ -3,9 +3,11 @@ import Navbar from '../../components/Navbar';
 import axios from 'axios';
 import { CheckCircle, ArrowLeft, Loader, User, FileText, Camera } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 
 const DriverProfilePage = ({ embed = false }) => {
     const navigate = useNavigate();
+    const { user } = useAuth();         // ← Get actual logged-in driver
     const [formData, setFormData] = useState({
         mobile: '', aadhaar: '', licenseImage: '', profileImage: ''
     });
@@ -40,13 +42,12 @@ const DriverProfilePage = ({ embed = false }) => {
 
     const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
-    // 1. HELPER: Upload File
+    // 1. HELPER: Upload File using real driver ID from context
     const uploadFile = async (file) => {
+        const driverId = user?.id;
+        if (!driverId) throw new Error('Not authenticated');
         const data = new FormData();
         data.append('file', file);
-        // Assuming we use the standard upload endpoint for simplicity or driver specific if needed
-        // Using the driver specific one we made which returns { imageUrl: ... }
-        const driverId = 1; // context user id needed, defaulting for now
         const res = await axios.post(`/api/driver/${driverId}/upload-profile-image`, data, {
             headers: { 'Content-Type': 'multipart/form-data' }
         });
@@ -194,8 +195,8 @@ const DriverProfilePage = ({ embed = false }) => {
                                             {selectedLicenseFile ? (
                                                 <span className="text-blue-400 text-sm font-medium">{selectedLicenseFile.name}</span>
                                             ) : (
-                                                 formData.licenseImage ? (
-                                                    <a href={formData.licenseImage} target="_blank" rel="noreferrer" className="text-emerald-400 text-sm hover:underline flex items-center gap-1">
+                                     formData.licenseImage ? (
+                                                    <a href={getImageUrl(formData.licenseImage)} target="_blank" rel="noreferrer" className="text-emerald-400 text-sm hover:underline flex items-center gap-1">
                                                         <CheckCircle className="w-4 h-4" /> Current Document Uploaded
                                                     </a>
                                                  ) : <span className="text-slate-500 text-sm">No document uploaded</span>

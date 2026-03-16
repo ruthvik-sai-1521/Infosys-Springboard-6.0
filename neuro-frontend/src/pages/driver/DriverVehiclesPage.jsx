@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import Navbar from '../../components/Navbar';
 import axios from 'axios';
-import { MapPin, Battery, Droplet, Gauge, PenTool, ArrowLeft, PlusCircle, Activity, X } from 'lucide-react';
+import { MapPin, Battery, Droplet, Gauge, PenTool, ArrowLeft, PlusCircle, Activity, X, AlertOctagon, Wrench, CheckCircle2, Clock, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { LiveMap } from '../../components/maps';
 import { Client } from '@stomp/stompjs';
@@ -41,15 +41,22 @@ const DriverVehiclesPage = () => {
     const [selectedHealthVehicle, setSelectedHealthVehicle] = useState(null);
     const [toasts, setToasts] = useState([]);
 
+    // Maintenance Submission
+    const [maintenanceModal, setMaintenanceModal] = useState(null); // vehicle object
+    const [maintForm, setMaintForm] = useState({ maintenanceDate: '', description: '' });
+    const [submittingMaint, setSubmittingMaint] = useState(false);
+    const [vehicleSubmissions, setVehicleSubmissions] = useState({}); // vehicleId -> latest submission
+
     // WebSocket
     const stompClientRef = useRef(null);
 
     // Form Stats
     const [vehicleForm, setVehicleForm] = useState({
-        vehicleNumber: '', type: 'SEDAN', seatCount: 3, fuelLevel: 100, kmsDriven: 0, 
-        mileage: 0, fuelCapacity: 0,
-        rcPdfUrl: '', insurancePdfUrl: ''
+        vehicleNumber: '', type: 'SEDAN', seatCount: 3, fuelLevel: 100, kmsDriven: 0,
+        mileage: 0, fuelCapacity: 0
     });
+    const [rcFile, setRcFile] = useState(null);
+    const [insuranceFile, setInsuranceFile] = useState(null);
 
     const driverId = user?.id; 
 
@@ -75,10 +82,63 @@ const DriverVehiclesPage = () => {
         } catch(e) { console.error("Error fetching alerts", e); }
     }, [driverId]);
 
+    const fetchDriverSubmissions = useCallback(async () => {
+        if (!driverId) return;
+        try {
+            const res = await axios.get(`/api/maintenance/my-submissions?driverId=${driverId}`);
+            // Only track PENDING submissions — APPROVED/REJECTED ones should not show the banner
+            const map = {};
+            res.data
+                .filter(s => s.status === 'PENDING')
+                .forEach(s => {
+                    const vid = s.vehicle?.id;
+                    if (vid && (!map[vid] || new Date(s.submissionDate) > new Date(map[vid].submissionDate))) {
+                        map[vid] = s;
+                    }
+                });
+            setVehicleSubmissions(map);
+        } catch (e) { console.error('Failed to fetch submissions', e); }
+    }, [driverId]);
+
+    const refreshAll = useCallback(async () => {
+        await Promise.all([fetchVehicles(), fetchAlerts(), fetchDriverSubmissions()]);
+    }, [fetchVehicles, fetchAlerts, fetchDriverSubmissions]);
+
+    // Poll every 5s when any vehicle is in a blocked state, so we catch manager approval quickly
+    const pollRef = useRef(null);
+    const startPolling = useCallback(() => {
+        if (pollRef.current) return; // already polling
+        pollRef.current = setInterval(() => {
+            refreshAll();
+        }, 5000);
+    }, [refreshAll]);
+
+    const stopPolling = useCallback(() => {
+        if (pollRef.current) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+        }
+    }, []);
+
+    // Start/stop polling based on whether any vehicle is blocked
+    useEffect(() => {
+        const anyBlocked = vehicles.some(v =>
+            v.holdStatus === 'ON_HOLD' || v.holdStatus === 'PENDING_RELEASE'
+        );
+        if (anyBlocked) {
+            startPolling();
+        } else {
+            stopPolling();
+        }
+        return () => {};
+    }, [vehicles, startPolling, stopPolling]);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => {
         if (driverId) {
             fetchVehicles();
             fetchAlerts();
+            fetchDriverSubmissions();
             connectWebSocket();
         } else {
              setLoading(false);
@@ -88,18 +148,24 @@ const DriverVehiclesPage = () => {
             if (stompClientRef.current) {
                 stompClientRef.current.deactivate();
             }
+            stopPolling();
         };
-    }, [fetchVehicles, fetchAlerts, driverId]);
+    }, [driverId]); // intentional: connectWebSocket is stable for session
 
     const connectWebSocket = () => {
         const socket = new SockJS('http://localhost:8080/ws');
         const client = new Client({
             webSocketFactory: () => socket,
             onConnect: () => {
-                // Subscribe to Driver Alerts
+                // Subscribe to Driver Health Alerts
                 client.subscribe(`/topic/alerts/driver/${driverId}`, (message) => {
                     const alert = JSON.parse(message.body);
                     handleNewAlert(alert);
+                });
+                // Subscribe to maintenance submission review results
+                client.subscribe(`/topic/notifications/driver/${driverId}`, (message) => {
+                    const notif = JSON.parse(message.body);
+                    handleMaintenanceReviewNotif(notif);
                 });
             },
             onStompError: (frame) => {
@@ -110,6 +176,23 @@ const DriverVehiclesPage = () => {
 
         client.activate();
         stompClientRef.current = client;
+    };
+
+    const handleMaintenanceReviewNotif = (notif) => {
+        const approved = notif.approved;
+        const toastObj = {
+            id: Date.now(),
+            title: approved ? '✅ Vehicle Released!' : '❌ Submission Rejected',
+            description: notif.message || (approved
+                ? `Vehicle ${notif.vehicleNumber} has been approved and released for trips.`
+                : `Your maintenance submission for ${notif.vehicleNumber} was rejected.`),
+            severity: approved ? 'INFO' : 'HIGH'
+        };
+        setToasts(prev => [...prev, toastObj]);
+        setTimeout(() => setToasts(prev => prev.filter(t => t.id !== toastObj.id)), 7000);
+        // Refresh vehicles and submissions so hold status updates
+        fetchVehicles();
+        fetchDriverSubmissions();
     };
 
     const handleNewAlert = (alert) => {
@@ -127,6 +210,7 @@ const DriverVehiclesPage = () => {
 
         // Refresh vehicles to update status if needed
         fetchVehicles();
+        fetchDriverSubmissions();
     };
 
     const handleTypeChange = (e) => {
@@ -140,24 +224,66 @@ const DriverVehiclesPage = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!driverId) {
-            alert("User not authenticated properly. Please reload.");
-            return;
-        }
+        if (!driverId) { alert('User not authenticated properly. Please reload.'); return; }
+        if (!rcFile) { alert('Please upload the RC Document (PDF or image).'); return; }
+        if (!insuranceFile) { alert('Please upload the Insurance Document (PDF or image).'); return; }
         try {
-            const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
-            await axios.post(`/api/driver/${driverId}/vehicle/add`, vehicleForm, config);
-            alert("Vehicle Submitted for Approval!");
+            const config = {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('token')}`,
+                    'Content-Type': 'multipart/form-data'
+                }
+            };
+            const formData = new FormData();
+            formData.append('vehicleNumber', vehicleForm.vehicleNumber);
+            formData.append('type', vehicleForm.type);
+            formData.append('seatCount', vehicleForm.seatCount);
+            formData.append('fuelLevel', vehicleForm.fuelLevel);
+            formData.append('kmsDriven', vehicleForm.kmsDriven);
+            formData.append('mileage', vehicleForm.mileage);
+            formData.append('fuelCapacity', vehicleForm.fuelCapacity);
+            formData.append('rcFile', rcFile);
+            formData.append('insuranceFile', insuranceFile);
+
+            await axios.post(`/api/driver/${driverId}/vehicle/add`, formData, config);
+            alert('Vehicle Submitted for Approval!');
             setFormVisible(false);
             fetchVehicles();
-            setVehicleForm({
-                vehicleNumber: '', type: 'SEDAN', seatCount: 3, fuelLevel: 100,
-                kmsDriven: 0, mileage: 0, fuelCapacity: 0,
-                rcPdfUrl: '', insurancePdfUrl: ''
-            });
+            setVehicleForm({ vehicleNumber: '', type: 'SEDAN', seatCount: 3, fuelLevel: 100, kmsDriven: 0, mileage: 0, fuelCapacity: 0 });
+            setRcFile(null);
+            setInsuranceFile(null);
         } catch (error) {
-            alert("Error: " + (error.response?.data?.error || error.message));
+            alert('Error: ' + (error.response?.data?.error || error.message));
         }
+    };
+
+    // ── Maintenance submission handler ─────────────────────────────────
+    const openMaintenanceModal = (vehicle) => {
+        setMaintenanceModal(vehicle);
+        setMaintForm({ maintenanceDate: new Date().toISOString().split('T')[0], description: '' });
+    };
+
+    const submitMaintenanceForm = async () => {
+        if (!maintForm.maintenanceDate) { alert('Please enter the maintenance date.'); return; }
+        if (!maintForm.description.trim()) { alert('Please describe the maintenance work done.'); return; }
+        setSubmittingMaint(true);
+        try {
+            const formData = new FormData();
+            formData.append('vehicleId', maintenanceModal.id);
+            formData.append('driverId', driverId);
+            formData.append('maintenanceDate', maintForm.maintenanceDate);
+            formData.append('description', maintForm.description);
+            await axios.post('/api/maintenance/submit', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            alert('Maintenance details submitted! Awaiting manager review.');
+            setMaintenanceModal(null);
+            fetchVehicles();
+            fetchDriverSubmissions();
+        } catch (e) {
+            alert('Failed to submit: ' + (e.response?.data?.error || e.message));
+        }
+        setSubmittingMaint(false);
     };
 
     return (
@@ -273,17 +399,51 @@ const DriverVehiclesPage = () => {
                             </div>
 
                             <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* RC Document Upload */}
                                 <div>
-                                    <label className="block text-sm text-slate-400 mb-1">RC Document URL (PDF/Link)</label>
-                                    <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white" placeholder="https://"
-                                        value={vehicleForm.rcPdfUrl}
-                                        onChange={e => setVehicleForm({...vehicleForm, rcPdfUrl: e.target.value})} />
+                                    <label className="block text-sm text-slate-400 mb-1">
+                                        RC Document <span className="text-red-400">*</span>
+                                        <span className="text-slate-500 ml-1">(PDF/JPG/PNG, max 10MB)</span>
+                                    </label>
+                                    <label className={`flex items-center gap-3 w-full border rounded-lg p-3 cursor-pointer transition-all ${
+                                        rcFile ? 'border-emerald-500 bg-emerald-900/10' : 'border-slate-700 bg-slate-900 hover:border-slate-600'
+                                    }`}>
+                                        <span className="text-2xl">{rcFile ? '📄' : '📁'}</span>
+                                        <span className={`text-sm truncate flex-1 ${rcFile ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                            {rcFile ? rcFile.name : 'Click to upload RC Document'}
+                                        </span>
+                                        {rcFile && (
+                                            <button type="button" onClick={(ev) => { ev.preventDefault(); setRcFile(null); }}
+                                                className="text-slate-500 hover:text-red-400 shrink-0 text-lg leading-none">
+                                                ✕
+                                            </button>
+                                        )}
+                                        <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden"
+                                            onChange={e => setRcFile(e.target.files[0] || null)} />
+                                    </label>
                                 </div>
-                                 <div>
-                                    <label className="block text-sm text-slate-400 mb-1">Insurance Document URL (PDF/Link)</label>
-                                    <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white" placeholder="https://"
-                                        value={vehicleForm.insurancePdfUrl}
-                                        onChange={e => setVehicleForm({...vehicleForm, insurancePdfUrl: e.target.value})} />
+                                {/* Insurance Document Upload */}
+                                <div>
+                                    <label className="block text-sm text-slate-400 mb-1">
+                                        Insurance Document <span className="text-red-400">*</span>
+                                        <span className="text-slate-500 ml-1">(PDF/JPG/PNG, max 10MB)</span>
+                                    </label>
+                                    <label className={`flex items-center gap-3 w-full border rounded-lg p-3 cursor-pointer transition-all ${
+                                        insuranceFile ? 'border-emerald-500 bg-emerald-900/10' : 'border-slate-700 bg-slate-900 hover:border-slate-600'
+                                    }`}>
+                                        <span className="text-2xl">{insuranceFile ? '📄' : '📁'}</span>
+                                        <span className={`text-sm truncate flex-1 ${insuranceFile ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                            {insuranceFile ? insuranceFile.name : 'Click to upload Insurance Document'}
+                                        </span>
+                                        {insuranceFile && (
+                                            <button type="button" onClick={(ev) => { ev.preventDefault(); setInsuranceFile(null); }}
+                                                className="text-slate-500 hover:text-red-400 shrink-0 text-lg leading-none">
+                                                ✕
+                                            </button>
+                                        )}
+                                        <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden"
+                                            onChange={e => setInsuranceFile(e.target.files[0] || null)} />
+                                    </label>
                                 </div>
                             </div>
 
@@ -310,14 +470,16 @@ const DriverVehiclesPage = () => {
                         </div>
                      :
                      vehicles.map(v => (
-                        <VehicleCard 
-                            key={v.id} 
-                            vehicle={v} 
-                            refresh={fetchVehicles} 
-                            alertCount={activeAlerts.filter(a => a.vehicleId === v.id || a.vehicle?.id === v.id).length}
-                            onViewHealth={() => setSelectedHealthVehicle(v)}
-                        />
-                     ))
+                         <VehicleCard 
+                             key={v.id} 
+                             vehicle={v} 
+                             refresh={fetchVehicles} 
+                             alertCount={activeAlerts.filter(a => a.vehicleId === v.id || a.vehicle?.id === v.id).length}
+                             onViewHealth={() => setSelectedHealthVehicle(v)}
+                             onSubmitMaintenance={openMaintenanceModal}
+                             latestSubmission={vehicleSubmissions[v.id]}
+                         />
+                      ))
                     }
                 </div>
             </div>
@@ -330,14 +492,77 @@ const DriverVehiclesPage = () => {
                     refreshData={() => { fetchVehicles(); fetchAlerts(); }}
                 />
             )}
+
+            {/* ── MAINTENANCE SUBMISSION MODAL ── */}
+            {maintenanceModal && (
+                <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-fade-in">
+                    <div className="bg-slate-900 w-full max-w-lg rounded-2xl border border-orange-500/40 shadow-2xl shadow-orange-900/20 overflow-hidden">
+                        <div className="bg-gradient-to-r from-orange-900/40 to-red-900/30 p-5 border-b border-orange-800/50 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-orange-500/20 rounded-xl flex items-center justify-center border border-orange-500/30">
+                                    <Wrench className="w-5 h-5 text-orange-400" />
+                                </div>
+                                <div>
+                                    <h3 className="text-lg font-bold text-white">Submit Maintenance Report</h3>
+                                    <p className="text-xs text-orange-300">{maintenanceModal.vehicleNumber} — Requesting Release from Hold</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setMaintenanceModal(null)} className="text-slate-400 hover:text-white p-1">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-5">
+                            <div className="bg-orange-900/20 border border-orange-700/40 rounded-xl p-4 text-sm text-orange-200">
+                                <AlertOctagon className="w-4 h-4 inline mr-2 text-orange-400" />
+                                Fill out the maintenance details below. The fleet manager will review and release the vehicle when satisfied.
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-semibold text-slate-300 mb-1.5">Maintenance Date <span className="text-red-400">*</span></label>
+                                <input
+                                    type="date"
+                                    value={maintForm.maintenanceDate}
+                                    onChange={e => setMaintForm(f => ({ ...f, maintenanceDate: e.target.value }))}
+                                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-orange-500 outline-none"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-semibold text-slate-300 mb-1.5">Maintenance Description <span className="text-red-400">*</span></label>
+                                <textarea
+                                    rows={5}
+                                    placeholder="Describe all maintenance work completed: e.g., Engine oil changed, brake pads replaced, tires inspected and inflated..."
+                                    value={maintForm.description}
+                                    onChange={e => setMaintForm(f => ({ ...f, description: e.target.value }))}
+                                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-orange-500 outline-none resize-none text-sm"
+                                />
+                            </div>
+
+                            <button
+                                onClick={submitMaintenanceForm}
+                                disabled={submittingMaint}
+                                className="w-full py-3 bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 text-white font-bold rounded-xl shadow-lg shadow-orange-900/40 transition-all disabled:opacity-60 flex items-center justify-center gap-2">
+                                {submittingMaint
+                                    ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Submitting...</>
+                                    : <><CheckCircle2 className="w-4 h-4" /> Submit for Manager Review</>}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
 
 // Extracted Component for cleaner logic per card
-const VehicleCard = ({ vehicle, refresh, alertCount = 0, onViewHealth }) => {
+const VehicleCard = ({ vehicle, refresh, alertCount = 0, onViewHealth, onSubmitMaintenance, latestSubmission }) => {
     const [simulating, setSimulating] = useState(false);
     const [localVehicle, setLocalVehicle] = useState(vehicle);
+
+    // ✔️ Sync localVehicle whenever parent fetches fresh data (e.g. after polling)
+    useEffect(() => {
+        setLocalVehicle(vehicle);
+    }, [vehicle]);
     const [intervalId, setIntervalId] = useState(null);
     const [mapCenter, setMapCenter] = useState(defaultCenter);
 
@@ -395,13 +620,61 @@ const VehicleCard = ({ vehicle, refresh, alertCount = 0, onViewHealth }) => {
         }
     };
 
+    // isCritical: only if actually on hold (not ACTIVE or null/undefined)
+    const isCritical = (localVehicle.holdStatus === 'ON_HOLD' || localVehicle.holdStatus === 'PENDING_RELEASE') &&
+                       localVehicle.holdStatus !== 'ACTIVE';
+    const isPendingRelease = localVehicle.holdStatus === 'PENDING_RELEASE';
+    const isOnHold = localVehicle.holdStatus === 'ON_HOLD';
+
     return (
-        <div className={`glass-card bg-slate-900/60 p-6 rounded-2xl border transition-all shadow-xl ${simulating ? 'border-emerald-500/50 shadow-emerald-500/10' : alertCount > 0 ? 'border-amber-500/30' : 'border-slate-800 hover:border-slate-600'}`}>
+        <div className={`glass-card bg-slate-900/60 p-6 rounded-2xl border transition-all shadow-xl ${
+            simulating ? 'border-emerald-500/50 shadow-emerald-500/10'
+            : isOnHold ? 'border-red-500/60 shadow-red-900/20'
+            : isPendingRelease ? 'border-orange-500/50 shadow-orange-900/20'
+            : alertCount > 0 ? 'border-amber-500/30'
+            : 'border-slate-800 hover:border-slate-600'}`}>
+
+            {/* ── Critical / Hold Banner ── */}
+            {isCritical && (
+                <div className={`-mx-6 -mt-6 mb-5 px-5 py-3 rounded-t-2xl border-b flex items-start gap-3 ${
+                    isPendingRelease
+                        ? 'bg-orange-900/30 border-orange-700/50'
+                        : 'bg-red-900/30 border-red-700/50'}`}>
+                    <AlertOctagon className={`w-5 h-5 mt-0.5 shrink-0 ${isPendingRelease ? 'text-orange-400' : 'text-red-400'}`} />
+                    <div className="flex-1 min-w-0">
+                        {isPendingRelease ? (
+                            <>
+                                <p className="text-orange-300 font-bold text-sm">Maintenance Review Pending</p>
+                                <p className="text-orange-400/70 text-xs mt-0.5">Your submission is awaiting manager approval. Trip posting is blocked until released.</p>
+                                {latestSubmission && (
+                                    <p className="text-xs text-orange-300/60 mt-1 italic">Submitted: {new Date(latestSubmission.submissionDate).toLocaleString()}</p>
+                                )}
+                                <p className="text-xs text-orange-300/50 mt-1">Refreshing automatically every 5s...</p>
+                            </>
+                        ) : (
+                            <>
+                                <p className="text-red-300 font-bold text-sm">🚨 Vehicle On Critical Hold — Trip Posting Blocked</p>
+                                <p className="text-red-400/70 text-xs mt-0.5">Health status is CRITICAL. Complete maintenance and submit a report for manager release.</p>
+                            </>
+                        )}
+                    </div>
+                    {isOnHold && (
+                        <button
+                            onClick={() => onSubmitMaintenance(localVehicle)}
+                            className="shrink-0 text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                            <Wrench className="w-3 h-3"/> Submit Report
+                        </button>
+                    )}
+                </div>
+            )}
+
             <div className="flex justify-between items-start mb-6">
                 <div>
                     <h3 className="text-2xl font-bold text-white flex items-center gap-3">
                         {localVehicle.vehicleNumber}
                         <span className="text-xs bg-slate-800 text-slate-300 px-2 py-1 rounded-md border border-slate-700 tracking-wider font-mono">{localVehicle.type}</span>
+                        {isPendingRelease && <span className="text-[10px] bg-orange-500/20 text-orange-400 border border-orange-500/30 px-2 py-0.5 rounded-full"><Clock className="w-2.5 h-2.5 inline mr-0.5"/>Pending</span>}
+                        {isOnHold && !isPendingRelease && <span className="text-[10px] bg-red-500/20 text-red-400 border border-red-500/30 px-2 py-0.5 rounded-full">ON HOLD</span>}
                     </h3>
                     <p className={`text-sm font-medium mt-1 inline-flex items-center gap-1.5 ${localVehicle.status === 'APPROVED' ? 'text-emerald-400' : 'text-amber-400'}`}>
                         <div className={`w-2 h-2 rounded-full ${localVehicle.status === 'APPROVED' ? 'bg-emerald-400' : 'bg-amber-400'}`}></div>

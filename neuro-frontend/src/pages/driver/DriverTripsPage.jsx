@@ -120,6 +120,16 @@ const DriverTripsPage = () => {
             return;
         }
 
+        // Verify authentication token exists
+        const token = localStorage.getItem('token');
+        if (!token) {
+            alert("❌ Authentication Error: You are not logged in. Please login again.");
+            console.error("No authentication token found. User needs to login.");
+            return;
+        }
+
+        console.log("✅ Authentication token found. Posting trip...");
+
         const tripDate = `${tripForm.date}T${tripForm.time}:00`;
 
         const payload = {
@@ -156,8 +166,18 @@ const DriverTripsPage = () => {
             });
             fetchTrips();
         } catch (err) {
-            console.error(err);
-            alert("Failed to post trip: " + (err.response?.data?.message || err.message));
+            console.error("Trip posting error:", err);
+            
+            // Enhanced error handling
+            if (err.response?.status === 401) {
+                alert("❌ Authentication Error: Your session has expired. Please login again.");
+                console.error("401 Unauthorized: Token may be expired or invalid");
+            } else if (err.response?.status === 403) {
+                alert("❌ Permission Denied: You don't have permission to post trips.");
+            } else {
+                const errorMsg = err.response?.data?.error || err.response?.data?.message || err.message;
+                alert("Failed to post trip: " + errorMsg);
+            }
         }
     };
 
@@ -296,9 +316,19 @@ const DriverTripsPage = () => {
         }
     };
 
-    // Filter Logic
-    const upcomingTrips = trips.filter(t => new Date(t.tripDate) > new Date() && t.status !== 'COMPLETED'); 
-    const completedTrips = trips.filter(t => t.status === 'COMPLETED' || new Date(t.tripDate) <= new Date());
+    // Filter Logic — status-based + time fallback for trips without explicit end
+    const isPastTrip = (t) => {
+        if (t.status === 'COMPLETED' || t.status === 'AUTO_COMPLETED') return true;
+        // If still SCHEDULED/IN_PROGRESS but scheduled time + duration has passed → treat as past
+        if (t.tripDate) {
+            const durationMins = t.estimatedDuration > 0 ? t.estimatedDuration : 60;
+            const expectedEnd = new Date(new Date(t.tripDate).getTime() + durationMins * 60000);
+            if (expectedEnd < new Date()) return true;
+        }
+        return false;
+    };
+    const upcomingTrips  = trips.filter(t => !isPastTrip(t));
+    const completedTrips = trips.filter(t => isPastTrip(t));
     const displayedTrips = activeTab === 'upcoming' ? upcomingTrips : completedTrips;
 
     return (
@@ -397,7 +427,7 @@ const DriverTripsPage = () => {
                                     </div>
                                     
                                     <div className="flex-1 flex justify-end gap-2 flex-wrap">
-                                        {/* View Route button for SCHEDULED trips */}
+                                        {/* View Route + Quick Start only for SCHEDULED trips */}
                                         {trip.status === 'SCHEDULED' && (
                                             <>
                                                 <button 
@@ -414,9 +444,9 @@ const DriverTripsPage = () => {
                                                 </button>
                                             </>
                                         )}
-                                        
-                                        {/* Live Tracking button for IN_PROGRESS trips */}
-                                        {trip.status === 'IN_PROGRESS' && (
+
+                                        {/* Live Tracking + End Trip only for IN_PROGRESS trips in Upcoming tab */}
+                                        {trip.status === 'IN_PROGRESS' && activeTab === 'upcoming' && (
                                             <>
                                                 <button 
                                                     onClick={() => handleViewLiveTracking(trip)} 
@@ -597,7 +627,7 @@ const DriverTripsPage = () => {
                                 </div>
                             </div>
                             
-                            <button onClick={handlePostTrip} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-lg font-bold transition-colors mt-4">Publish Trip</button>
+                            <button type="button" onClick={handlePostTrip} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-lg font-bold transition-colors mt-4">Publish Trip</button>
                             </div>
                         </div>
                     </div>

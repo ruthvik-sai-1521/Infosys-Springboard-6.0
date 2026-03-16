@@ -72,9 +72,10 @@ public class TripService {
 
     /**
      * Calculate fare based on vehicle type and distance
-     * SUV: ₹2.5 per km
-     * Sedan/Hatchback: ₹2 per km
-     * EV: ₹1.7 per km
+     * EV: ₹15 per km
+     * Hatchback: ₹20 per km
+     * Sedan: ₹25 per km
+     * SUV: ₹30 per km
      */
     private Double calculateFare(String vehicleType, Double distanceKm) {
         if (distanceKm == null || distanceKm <= 0) {
@@ -86,21 +87,22 @@ public class TripService {
 
         switch (type) {
             case "SUV":
-                ratePerKm = 2.5;
-                break;
-            case "EV":
-                ratePerKm = 1.7;
+                ratePerKm = 30.0;
                 break;
             case "SEDAN":
+                ratePerKm = 25.0;
+                break;
             case "HATCHBACK":
-                ratePerKm = 2.0;
+                ratePerKm = 20.0;
+                break;
+            case "EV":
+                ratePerKm = 15.0;
                 break;
             default:
-                // Default to sedan rate if type not recognized
-                ratePerKm = 2.0;
+                ratePerKm = 20.0; // default to hatchback rate
         }
 
-        return Math.round(distanceKm * ratePerKm * 100.0) / 100.0; // Round to 2 decimal places
+        return Math.round(distanceKm * ratePerKm * 100.0) / 100.0;
     }
 
     public List<Trip> searchTrips(String source, String destination) {
@@ -166,25 +168,49 @@ public class TripService {
     }
 
     /**
-     * Auto-end trips that have exceeded their auto-end time
-     * Called by scheduler
+     * Auto-end trips that have exceeded their auto-end time (IN_PROGRESS)
+     * Also auto-completes SCHEDULED trips whose scheduled time + duration has
+     * passed
+     * Called by scheduler every 5 minutes
      */
     public void autoEndTrips() {
         LocalDateTime now = LocalDateTime.now();
-        List<Trip> tripsToEnd = tripRepository.findByStatusAndAutoEndTimeBefore("IN_PROGRESS", now);
 
+        // 1. Auto-end IN_PROGRESS trips that exceeded their duration
+        List<Trip> tripsToEnd = tripRepository.findByStatusAndAutoEndTimeBefore("IN_PROGRESS", now);
         for (Trip trip : tripsToEnd) {
             trip.setStatus("AUTO_COMPLETED");
             trip.setActualEndTime(trip.getAutoEndTime() != null ? trip.getAutoEndTime() : now);
-
-            // Update driver statistics
             updateDriverStats(trip);
-
-            // Update vehicle health based on trip distance
             updateVehicleHealthAfterTrip(trip);
-
             tripRepository.save(trip);
-            System.out.println("Auto-ended trip #" + trip.getId() + " for driver " + trip.getDriver().getUsername());
+            System.out.println("Auto-ended IN_PROGRESS trip #" + trip.getId());
+        }
+
+        // 2. Auto-complete SCHEDULED trips whose scheduled time + estimated duration
+        // has passed
+        List<Trip> scheduledTrips = tripRepository.findByStatus("SCHEDULED");
+        for (Trip trip : scheduledTrips) {
+            if (trip.getTripDate() == null)
+                continue;
+
+            // Use estimatedDuration if available, else default 60 minutes
+            int durationMinutes = (trip.getEstimatedDuration() != null && trip.getEstimatedDuration() > 0)
+                    ? trip.getEstimatedDuration()
+                    : 60;
+
+            LocalDateTime expectedEnd = trip.getTripDate().plusMinutes(durationMinutes);
+
+            if (expectedEnd.isBefore(now)) {
+                trip.setStatus("AUTO_COMPLETED");
+                trip.setActualStartTime(trip.getTripDate());
+                trip.setActualEndTime(expectedEnd);
+                updateDriverStats(trip);
+                updateVehicleHealthAfterTrip(trip);
+                tripRepository.save(trip);
+                System.out.println("Auto-completed overdue SCHEDULED trip #" + trip.getId()
+                        + " (was scheduled for " + trip.getTripDate() + ")");
+            }
         }
     }
 
